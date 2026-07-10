@@ -1,0 +1,819 @@
+/* =============================================================
+   SLATE — style.css
+   -------------------------------------------------------------
+   Reading order:
+     0. Design tokens          (:root  +  [data-theme="dark"])
+     1. Reset & base
+     2. Typography helpers
+     3. Layout shell           (topbar / layout / sidebar / workspace)
+     4. Buttons & icon buttons
+     5. Search
+     6. Sidebar nav (folders, tags)
+     7. Note list (the Keep-style card wall)
+     8. Editor
+     9. Empty & placeholder states
+    10. Toasts
+    11. Motion / keyframes
+    12. Responsive (mobile-first → desktop)
+   -------------------------------------------------------------
+   All color is OKLCH. Neutrals are tinted toward the brand hue
+   (a soft violet, ~295) so nothing reads as dead gray. Spacing
+   follows a 4pt scale exposed as --space-* tokens. Vertical
+   rhythm is built on a 24px base (1.5 line-height on 16px body).
+   ============================================================= */
+
+
+/* ============ 0. DESIGN TOKENS ============ */
+:root {
+  /* --- Brand hue: a calm violet. Everything tints toward this. --- */
+  --hue: 295;
+
+  /* --- Surfaces (light). Higher number = "closer to the user". --- */
+  --surface-0: oklch(98.5% 0.006 var(--hue)); /* app background */
+  --surface-1: oklch(100% 0 0);               /* cards, editor */
+  --surface-2: oklch(96%   0.008 var(--hue)); /* hover / sunken wells */
+  --surface-3: oklch(93%   0.010 var(--hue)); /* active, chips */
+
+  /* --- Text --- */
+  --text-strong: oklch(24% 0.02  var(--hue)); /* headings, titles */
+  --text:        oklch(34% 0.015 var(--hue)); /* body */
+  --text-soft:   oklch(52% 0.012 var(--hue)); /* metadata, hints */
+  --text-faint:  oklch(66% 0.010 var(--hue)); /* placeholders */
+
+  /* --- Lines --- */
+  --border:        oklch(90% 0.008 var(--hue));
+  --border-strong: oklch(84% 0.010 var(--hue));
+
+  /* --- Primary accent (used sparingly: ~10% of the surface) --- */
+  --primary:        oklch(58% 0.17 var(--hue));
+  --primary-hover:  oklch(53% 0.18 var(--hue));
+  --primary-soft:   oklch(94% 0.05 var(--hue)); /* tinted fill behind accents */
+  --on-primary:     oklch(99% 0.01 var(--hue));
+
+  /* --- Semantic --- */
+  --danger:      oklch(58% 0.18 25);
+  --danger-soft: oklch(95% 0.04 25);
+  --pin:         oklch(72% 0.15 85); /* warm amber for the pin */
+
+  /* --- Elevation (subtle; if you clearly see it, it's too strong) --- */
+  --shadow-sm: 0 1px 2px oklch(24% 0.02 var(--hue) / 0.06);
+  --shadow-md: 0 2px 6px oklch(24% 0.02 var(--hue) / 0.08),
+               0 1px 2px oklch(24% 0.02 var(--hue) / 0.05);
+  --shadow-lg: 0 8px 28px oklch(24% 0.02 var(--hue) / 0.14);
+
+  /* --- 4pt spacing scale --- */
+  --space-2xs: 0.25rem; /*  4px */
+  --space-xs:  0.5rem;  /*  8px */
+  --space-sm:  0.75rem; /* 12px */
+  --space-md:  1rem;    /* 16px */
+  --space-lg:  1.5rem;  /* 24px */
+  --space-xl:  2rem;    /* 32px */
+  --space-2xl: 3rem;    /* 48px */
+
+  /* --- Radii: generous & rounded, per the brief --- */
+  --radius-sm:  8px;
+  --radius-md:  12px;
+  --radius-lg:  18px;
+  --radius-xl:  24px;
+  --radius-pill: 999px;
+
+  /* --- Motion --- */
+  --ease-out:  cubic-bezier(0.16, 1, 0.3, 1);   /* expo-ish, for entrances */
+  --ease-in:   cubic-bezier(0.7, 0, 0.84, 0);
+  --dur-fast:  120ms;
+  --dur-mid:   240ms;
+  --dur-slow:  400ms;
+
+  /* --- Layout constants --- */
+  --topbar-h:  60px;
+  --sidebar-w: 264px;
+
+  /* --- Z-index scale (semantic, never arbitrary) --- */
+  --z-sidebar: 40;
+  --z-scrim:   35;
+  --z-topbar:  50;
+  --z-toast:   80;
+
+  color-scheme: light;
+}
+
+/* --- DARK THEME ---
+   Not an inversion. Depth comes from LIGHTER surfaces, not shadows.
+   Same hue/chroma family, only lightness shifts. Text weight is
+   nudged down elsewhere because light-on-dark reads heavier. */
+[data-theme="dark"] {
+  --surface-0: oklch(16% 0.014 var(--hue));
+  --surface-1: oklch(20% 0.016 var(--hue));
+  --surface-2: oklch(24% 0.018 var(--hue));
+  --surface-3: oklch(29% 0.020 var(--hue));
+
+  --text-strong: oklch(96% 0.008 var(--hue));
+  --text:        oklch(87% 0.010 var(--hue));
+  --text-soft:   oklch(70% 0.012 var(--hue));
+  --text-faint:  oklch(56% 0.012 var(--hue));
+
+  --border:        oklch(30% 0.018 var(--hue));
+  --border-strong: oklch(38% 0.020 var(--hue));
+
+  --primary:       oklch(70% 0.14 var(--hue)); /* desaturated a touch for dark */
+  --primary-hover: oklch(75% 0.14 var(--hue));
+  --primary-soft:  oklch(30% 0.06 var(--hue));
+  --on-primary:    oklch(18% 0.02 var(--hue));
+
+  --danger:      oklch(66% 0.16 25);
+  --danger-soft: oklch(30% 0.06 25);
+  --pin:         oklch(78% 0.13 85);
+
+  /* Shadows barely register on dark; keep them faint. */
+  --shadow-sm: 0 1px 2px oklch(0% 0 0 / 0.30);
+  --shadow-md: 0 2px 8px oklch(0% 0 0 / 0.35);
+  --shadow-lg: 0 10px 30px oklch(0% 0 0 / 0.45);
+
+  color-scheme: dark;
+}
+
+
+/* ============ 1. RESET & BASE ============ */
+*, *::before, *::after { box-sizing: border-box; }
+
+* { margin: 0; }
+
+html, body { height: 100%; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  font-weight: 400;
+  color: var(--text);
+  background: var(--surface-0);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-optical-sizing: auto;
+  /* Respect notches / home indicators on mobile */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+           env(safe-area-inset-bottom) env(safe-area-inset-left);
+  overflow: hidden; /* the panes scroll internally, not the page */
+}
+
+/* Bump text weight down slightly in dark mode (compensation) */
+[data-theme="dark"] body { font-weight: 350; }
+
+input, textarea, button { font: inherit; color: inherit; }
+
+button { cursor: pointer; background: none; border: none; }
+
+ul, ol { list-style: none; padding: 0; }
+
+a { color: inherit; text-decoration: none; }
+
+/* Consistent, high-contrast focus ring for keyboard users only */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Lucide icons inherit sizing from the <i> we set in markup */
+[data-lucide] { display: inline-block; vertical-align: middle; }
+
+/* Skip link: hidden until focused */
+.skip-link {
+  position: absolute;
+  left: var(--space-md);
+  top: -3rem;
+  z-index: 100;
+  padding: var(--space-xs) var(--space-md);
+  background: var(--primary);
+  color: var(--on-primary);
+  border-radius: var(--radius-md);
+  transition: top var(--dur-mid) var(--ease-out);
+}
+.skip-link:focus { top: var(--space-md); }
+
+
+/* ============ 2. TYPOGRAPHY HELPERS ============ */
+h1, h2, h3 { text-wrap: balance; color: var(--text-strong); line-height: 1.25; }
+
+.sidebar__label {
+  font-size: 0.6875rem;      /* 11px */
+  font-weight: 600;
+  letter-spacing: 0.08em;    /* all-caps needs tracking */
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+
+
+/* ============ 3. LAYOUT SHELL ============ */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-topbar);
+  height: var(--topbar-h);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding-inline: var(--space-md);
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand { display: flex; align-items: center; gap: var(--space-xs); }
+.brand__mark {
+  display: grid;
+  place-items: center;
+  width: 34px; height: 34px;
+  border-radius: var(--radius-md);
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+.brand__name {
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text-strong);
+}
+
+.topbar__actions { display: flex; align-items: center; gap: var(--space-xs); margin-left: auto; }
+
+/* The layout below the topbar fills the remaining height */
+.layout {
+  display: flex;
+  height: calc(100dvh - var(--topbar-h));
+  position: relative;
+}
+
+/* --- Sidebar --- */
+.sidebar {
+  width: var(--sidebar-w);
+  flex-shrink: 0;
+  background: var(--surface-1);
+  border-right: 1px solid var(--border);
+  padding: var(--space-lg) var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+  overflow-y: auto;
+}
+.sidebar__section { display: flex; flex-direction: column; gap: var(--space-xs); }
+.sidebar__heading { display: flex; align-items: center; justify-content: space-between; }
+.sidebar__footer {
+  margin-top: auto;
+  display: flex;
+  gap: var(--space-xs);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border);
+}
+.sidebar__footer .btn { flex: 1; }
+
+/* --- Workspace: list + editor side by side on desktop --- */
+.workspace {
+  flex: 1;
+  display: flex;
+  min-width: 0; /* let children shrink instead of overflowing */
+  position: relative;
+}
+.list-pane {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: var(--space-lg);
+}
+.list-pane__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-lg);
+}
+.list-pane__title { font-size: 1.375rem; font-weight: 700; letter-spacing: -0.01em; }
+.list-pane__meta { font-size: 0.8125rem; color: var(--text-soft); }
+
+
+/* ============ 4. BUTTONS ============ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-md);
+  border-radius: var(--radius-md);
+  font-size: 0.9375rem;
+  font-weight: 550;
+  color: var(--text);
+  transition: background var(--dur-fast) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out);
+}
+.btn i { width: 18px; height: 18px; }
+.btn:active { transform: scale(0.97); }
+
+.btn--primary {
+  background: var(--primary);
+  color: var(--on-primary);
+  box-shadow: var(--shadow-sm);
+}
+.btn--primary:hover { background: var(--primary-hover); box-shadow: var(--shadow-md); }
+
+.btn--ghost { color: var(--text-soft); }
+.btn--ghost:hover { background: var(--surface-2); color: var(--text); }
+
+/* Icon-only buttons. 40px keeps the tap target comfortable. */
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 40px; height: 40px;
+  border-radius: var(--radius-md);
+  color: var(--text-soft);
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out);
+}
+.icon-btn i { width: 20px; height: 20px; }
+.icon-btn:hover { background: var(--surface-2); color: var(--text); }
+.icon-btn:active { transform: scale(0.92); }
+.icon-btn--sm { width: 30px; height: 30px; }
+.icon-btn--sm i { width: 16px; height: 16px; }
+.icon-btn--danger:hover { background: var(--danger-soft); color: var(--danger); }
+
+/* pressed pin state (aria-pressed toggled by JS) */
+.icon-btn[aria-pressed="true"] { color: var(--pin); }
+
+
+/* ============ 5. SEARCH ============ */
+.search {
+  position: relative;
+  flex: 1;
+  max-width: 520px;
+  display: flex;
+  align-items: center;
+}
+.search__icon {
+  position: absolute;
+  left: var(--space-sm);
+  width: 18px; height: 18px;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+.search__input {
+  width: 100%;
+  padding: 0.5rem 2.25rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  transition: background var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
+}
+.search__input::placeholder { color: var(--text-faint); }
+.search__input:focus {
+  outline: none;
+  background: var(--surface-1);
+  border-color: var(--border-strong);
+}
+.search__clear {
+  position: absolute;
+  right: var(--space-xs);
+  display: grid;
+  place-items: center;
+  width: 28px; height: 28px;
+  border-radius: var(--radius-pill);
+  color: var(--text-soft);
+}
+.search__clear:hover { background: var(--surface-3); }
+.search__clear i { width: 16px; height: 16px; }
+
+
+/* ============ 6. SIDEBAR NAV ============ */
+.nav-list { display: flex; flex-direction: column; gap: 2px; }
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  text-align: left;
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.nav-item i { width: 18px; height: 18px; color: var(--text-soft); flex-shrink: 0; }
+.nav-item:hover { background: var(--surface-2); }
+.nav-item__label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-item__count { font-size: 0.75rem; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+
+/* Active nav item: soft tinted fill + accent text/icon. No side stripe. */
+.nav-item.is-active {
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-weight: 550;
+}
+.nav-item.is-active i { color: var(--primary); }
+
+/* inline folder rename input reuses the nav slot */
+.nav-item__rename {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-xs);
+  background: var(--surface-1);
+}
+
+/* --- Tag cloud --- */
+.tag-list { display: flex; flex-wrap: wrap; gap: var(--space-2xs); }
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  padding: 3px var(--space-sm);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  color: var(--text-soft);
+  font-size: 0.8125rem;
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.tag::before { content: "#"; color: var(--text-faint); }
+.tag:hover { background: var(--surface-3); color: var(--text); }
+.tag.is-active { background: var(--primary); color: var(--on-primary); }
+.tag.is-active::before { color: var(--on-primary); opacity: 0.7; }
+
+
+/* ============ 7. NOTE LIST (Keep-style card wall) ============ */
+/*
+   CSS multi-column gives us the masonry "flow" Keep is known for:
+   cards pack top-to-bottom, then wrap to the next column. It avoids
+   the rigid equal-row look of grid and needs no JS.
+*/
+.note-list {
+  column-gap: var(--space-md);
+  columns: 1;
+}
+
+.note-card {
+  /* break-inside avoids a card being split across two columns */
+  break-inside: avoid;
+  margin-bottom: var(--space-md);
+  padding: var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-mid) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
+  /* entrance animation, staggered via --i set inline by ui.js */
+  animation: card-in var(--dur-slow) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 40ms);
+}
+.note-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+  border-color: var(--border-strong);
+}
+.note-card.is-selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+
+.note-card__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-2xs);
+}
+.note-card__title {
+  flex: 1;
+  min-width: 0;
+  font-size: 1rem;
+  font-weight: 650;
+  color: var(--text-strong);
+  /* clamp long titles to a single line */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.note-card__pin {
+  flex-shrink: 0;
+  width: 26px; height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  transition: color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+.note-card__pin i { width: 16px; height: 16px; }
+.note-card__pin:hover { background: var(--surface-2); color: var(--text-soft); }
+.note-card__pin.is-pinned { color: var(--pin); }
+
+.note-card__excerpt {
+  font-size: 0.875rem;
+  color: var(--text-soft);
+  /* clamp body preview to a handful of lines */
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.note-card__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-top: var(--space-sm);
+  flex-wrap: wrap;
+}
+.note-card__date {
+  font-size: 0.75rem;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.note-card__tags { display: flex; flex-wrap: wrap; gap: var(--space-2xs); margin-left: auto; }
+.chip {
+  font-size: 0.6875rem;
+  padding: 1px var(--space-xs);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  color: var(--text-soft);
+}
+.chip::before { content: "#"; opacity: 0.5; }
+
+/* subtle folder badge on a card */
+.note-card__folder {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.6875rem;
+  color: var(--text-faint);
+}
+.note-card__folder i { width: 12px; height: 12px; }
+
+
+/* ============ 8. EDITOR ============ */
+.editor-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.editor-pane__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-md);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-1);
+}
+.editor-pane__tools { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+
+.save-status {
+  font-size: 0.75rem;
+  color: var(--text-faint);
+  padding-inline: var(--space-xs);
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.save-status[data-state="saving"] { color: var(--text-soft); }
+.save-status[data-state="saved"]  { color: var(--primary); }
+
+.editor {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-lg) var(--space-xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+.editor__title {
+  border: none;
+  background: none;
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-strong);
+}
+.editor__title:focus { outline: none; }
+.editor__title::placeholder { color: var(--text-faint); }
+
+.editor__tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2xs);
+  padding-bottom: var(--space-xs);
+  border-bottom: 1px solid var(--border);
+}
+.editor__tag-input {
+  border: none;
+  background: none;
+  min-width: 100px;
+  flex: 1;
+  padding: 2px;
+}
+.editor__tag-input:focus { outline: none; }
+/* removable chip inside the editor */
+.editor__tags .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: var(--surface-2);
+  padding: 2px var(--space-xs);
+}
+.editor__tags .chip button {
+  display: grid; place-items: center;
+  color: var(--text-faint);
+  border-radius: var(--radius-pill);
+}
+.editor__tags .chip button:hover { color: var(--danger); }
+.editor__tags .chip i { width: 12px; height: 12px; }
+
+.editor__body {
+  flex: 1;
+  border: none;
+  background: none;
+  resize: none;
+  font-size: 1rem;
+  line-height: 1.7; /* looser leading for long-form reading */
+  color: var(--text);
+  min-height: 40vh;
+  max-width: 72ch; /* cap measure for readability */
+}
+.editor__body:focus { outline: none; }
+.editor__body::placeholder { color: var(--text-faint); }
+
+
+/* ============ 9. EMPTY & PLACEHOLDER STATES ============ */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-sm);
+  padding: var(--space-2xl) var(--space-md);
+  color: var(--text-soft);
+}
+.empty__icon { width: 40px; height: 40px; color: var(--text-faint); }
+.empty__title { font-size: 1.125rem; font-weight: 600; color: var(--text); }
+.empty__hint { font-size: 0.875rem; max-width: 32ch; }
+.empty .btn { margin-top: var(--space-xs); }
+
+.editor-placeholder {
+  flex: 1;
+  display: none; /* only shown on desktop when nothing is selected */
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  color: var(--text-faint);
+  border-left: 1px solid var(--border);
+}
+.editor-placeholder__icon { width: 32px; height: 32px; }
+
+
+/* ============ 10. TOASTS ============ */
+.toast-region {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--space-lg) + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  width: min(92vw, 420px);
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  background: var(--surface-3);
+  color: var(--text-strong);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  animation: toast-in var(--dur-mid) var(--ease-out);
+}
+.toast.is-leaving { animation: toast-out var(--dur-fast) var(--ease-in) forwards; }
+.toast__msg { flex: 1; font-size: 0.875rem; }
+.toast__action {
+  font-weight: 600;
+  color: var(--primary);
+  padding: 2px var(--space-xs);
+  border-radius: var(--radius-sm);
+}
+.toast__action:hover { background: var(--primary-soft); }
+
+
+/* ============ 11. MOTION / KEYFRAMES ============ */
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes toast-out {
+  to { opacity: 0; transform: translateY(8px); }
+}
+
+/* The scrim behind the mobile drawer */
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-scrim);
+  background: oklch(20% 0.02 var(--hue) / 0.45);
+  animation: fade-in var(--dur-mid) var(--ease-out);
+}
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* Honor reduced-motion: kill non-essential animation */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+
+/* ============ 12. RESPONSIVE ============ */
+/*
+   MOBILE-FIRST is the default above. Here we progressively enhance.
+   Mobile behavior (default, no media query):
+     - Sidebar is an off-canvas drawer (translated off-screen).
+     - <main data-view> swaps between list and editor as full pages.
+     - "New note" button collapses to just its icon.
+*/
+
+/* Sidebar drawer (mobile default) */
+.sidebar {
+  position: fixed;
+  top: var(--topbar-h);
+  left: 0;
+  bottom: 0;
+  z-index: var(--z-sidebar);
+  transform: translateX(-100%);
+  transition: transform var(--dur-mid) var(--ease-out);
+  box-shadow: var(--shadow-lg);
+}
+.sidebar.is-open { transform: translateX(0); }
+
+/* On mobile, list & editor are stacked pages toggled by data-view */
+.editor-pane { position: absolute; inset: 0; background: var(--surface-0); }
+.workspace[data-view="list"]   .editor-pane { display: none; }
+.workspace[data-view="editor"] .list-pane   { display: none; }
+
+/* Hide the "New note" label on small screens (icon only) */
+.topbar__new span { display: none; }
+
+/* Two columns of cards once there's room */
+@media (min-width: 560px) {
+  .note-list { columns: 2; }
+}
+
+/* --- TABLET / DESKTOP --- */
+@media (min-width: 900px) {
+  /* Sidebar becomes a permanent rail */
+  .sidebar {
+    position: static;
+    transform: none;
+    box-shadow: none;
+    top: auto;
+  }
+  .topbar__menu { display: none; } /* no hamburger needed */
+  .scrim { display: none !important; }
+
+  /* Show the New-note label again */
+  .topbar__new span { display: inline; }
+
+  /* List and editor sit SIDE BY SIDE. The editor is a fixed-ish column. */
+  .workspace { }
+  .list-pane { max-width: 520px; border-right: 1px solid var(--border); }
+  .note-list { columns: 2; }
+
+  /* Editor is inline (not an overlay) on desktop */
+  .editor-pane { position: static; inset: auto; flex: 1; }
+  .editor-pane__back { display: none; } /* no "back" on desktop */
+
+  /* data-view no longer hides panes on desktop — show both */
+  .workspace[data-view="list"]   .editor-pane { display: flex; }
+  .workspace[data-view="editor"] .list-pane   { display: block; }
+
+  /* When nothing is selected, hide the editor pane and show the placeholder */
+  .workspace:not(.has-selection) .editor-pane { display: none; }
+  .workspace:not(.has-selection) .editor-placeholder { display: flex; }
+  .workspace.has-selection .editor-placeholder { display: none; }
+}
+
+/* --- WIDE --- */
+@media (min-width: 1280px) {
+  .list-pane { max-width: 560px; }
+  .note-list { columns: 3; }
+  .editor { padding-inline: var(--space-2xl); }
+}

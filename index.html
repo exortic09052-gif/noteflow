@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<!-- skill:chrome -->
+<style>
+/* Credit line — bottom-right */
+.design-ui-credit {
+  position: fixed;
+  bottom: 12px;
+  right: 12px;
+  font: 11px/1 system-ui, sans-serif;
+  color: rgba(128,128,128,0.5);
+  pointer-events: none;
+  z-index: 2147483647;
+  transition: opacity 0.4s ease;
+  user-select: none;
+  letter-spacing: 0.02em;
+}
+
+/* Hide chrome on touch devices */
+@media (hover: none) {
+  .design-ui-credit { display: none; }
+}
+
+/* Print fixes */
+@media print {
+  * {
+    transition: none !important;
+    animation: none !important;
+    box-shadow: none !important;
+  }
+  body {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  .design-ui-credit { display: none !important; }
+}
+
+</style>
+<script>
+(function () {
+    // Design-ui pages are single compositions, so the whole body is editable.
+    function markEditable() {
+        document.body.classList.add('artifact-editable');
+    }
+
+    // Credit badge with idle-fade. Hover devices only.
+    function initChromeUI() {
+        if (!matchMedia('(hover: hover)').matches) return;
+
+        var credit = document.createElement('div');
+        credit.className = 'design-ui-credit';
+        credit.setAttribute('aria-hidden', 'true');
+        credit.innerHTML = '\u{1F49C} by ClickUp Brain';
+        document.body.appendChild(credit);
+
+        var timer = null;
+        var fade = function (out) { credit.style.opacity = out ? '0' : ''; };
+        fade(true);
+        var show = function () {
+            fade(false);
+            clearTimeout(timer);
+            timer = setTimeout(function () { fade(true); }, 3000);
+        };
+        document.addEventListener('mousemove', show);
+        show();
+    }
+
+    function init() {
+        markEditable();
+        initChromeUI();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+})();
+
+</script>
+<!-- /skill:chrome -->
+<!-- skill:libraries -->
+<script src="https://cdn.jsdelivr.net/npm/lucide@0.383.0/dist/umd/lucide.min.js" integrity="sha384-wHFvAtjmgnkA2PJcMsDaCgdipf7X7YV44X/igbLHpvGiq6T5/PvFKl93grpvtbQT" crossorigin="anonymous"></script>
+<script>document.addEventListener("DOMContentLoaded",()=>lucide.createIcons())</script>
+<!-- /skill:libraries -->
+  <meta charset="UTF-8" />
+  <!-- viewport-fit=cover lets us pad around notches on mobile; user-scalable stays on for a11y -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="description" content="A fast, offline-first note-taking app." />
+
+  <!-- PWA hooks. These are wired up in File 8 (manifest) and File 9 (service worker). -->
+  <meta name="theme-color" content="#f7f6f9" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#17151c" media="(prefers-color-scheme: dark)" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+
+  <title>Slate — Notes</title>
+
+  <!--
+    We set the theme BEFORE CSS/paint to avoid a "flash of wrong theme".
+    This tiny inline script reads the saved preference (or the OS setting)
+    and stamps it on <html> immediately. It's the one exception to our
+    "no inline JS" rule, and it exists purely to kill the flash.
+  -->
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem('slate:theme');
+        var theme = saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (e) { /* private mode / storage blocked — fall back to default */ }
+    })();
+  </script>
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+  <!--
+    LAYOUT OVERVIEW
+    ==============================================================
+    The app is a single-page shell with THREE regions:
+
+      1. <header class="topbar">   — app title, search, theme toggle, new-note
+      2. <aside class="sidebar">    — folders + tags navigation, import/export
+      3. <main class="workspace">   — the note list AND the editor
+
+    On MOBILE the sidebar is an off-canvas drawer, and the list/editor
+    swap as full-screen "pages". On DESKTOP all three sit side by side.
+    Everything inside data-mount points is rendered by js/ui.js — the
+    HTML here is only the static chrome.
+    ============================================================== -->
+
+  <!-- Skip link: first tab stop, lets keyboard users jump straight to content -->
+  <a class="skip-link" href="#note-list">Skip to notes</a>
+
+  <!-- ============ 1. TOP BAR ============ -->
+  <header class="topbar">
+    <button
+      class="icon-btn topbar__menu"
+      type="button"
+      data-action="toggle-sidebar"
+      aria-label="Open menu"
+      aria-expanded="false"
+      aria-controls="sidebar"
+    >
+      <i data-lucide="menu"></i>
+    </button>
+
+    <a class="brand" href="#" data-action="clear-filters">
+      <span class="brand__mark" aria-hidden="true">
+        <i data-lucide="notebook-pen"></i>
+      </span>
+      <span class="brand__name">Slate</span>
+    </a>
+
+    <!-- Search is a real form so Enter behaves and screen readers announce it -->
+    <form class="search" role="search" data-action="search">
+      <i data-lucide="search" class="search__icon" aria-hidden="true"></i>
+      <input
+        class="search__input"
+        type="search"
+        name="q"
+        placeholder="Search notes"
+        autocomplete="off"
+        aria-label="Search notes"
+      />
+      <button class="search__clear" type="reset" aria-label="Clear search" hidden>
+        <i data-lucide="x"></i>
+      </button>
+    </form>
+
+    <div class="topbar__actions">
+      <!-- Theme toggle. The icon inside is swapped by ui.js based on data-theme. -->
+      <button
+        class="icon-btn"
+        type="button"
+        data-action="toggle-theme"
+        aria-label="Toggle dark mode"
+      >
+        <i data-lucide="moon"></i>
+      </button>
+
+      <button class="btn btn--primary topbar__new" type="button" data-action="new-note">
+        <i data-lucide="plus"></i>
+        <span>New note</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Dim overlay behind the mobile drawer. Tapping it closes the sidebar. -->
+  <div class="scrim" data-action="close-sidebar" hidden></div>
+
+  <div class="layout">
+    <!-- ============ 2. SIDEBAR ============ -->
+    <aside class="sidebar" id="sidebar" aria-label="Folders and tags">
+      <nav class="sidebar__section">
+        <p class="sidebar__label">Library</p>
+        <ul class="nav-list" data-mount="smart-folders">
+          <!-- ui.js renders "All notes" and "Pinned" here -->
+        </ul>
+      </nav>
+
+      <nav class="sidebar__section">
+        <div class="sidebar__heading">
+          <p class="sidebar__label">Folders</p>
+          <button class="icon-btn icon-btn--sm" type="button" data-action="new-folder" aria-label="New folder">
+            <i data-lucide="folder-plus"></i>
+          </button>
+        </div>
+        <ul class="nav-list" data-mount="folders">
+          <!-- ui.js renders user folders here -->
+        </ul>
+      </nav>
+
+      <nav class="sidebar__section">
+        <p class="sidebar__label">Tags</p>
+        <ul class="tag-list" data-mount="tags">
+          <!-- ui.js renders the tag cloud here -->
+        </ul>
+      </nav>
+
+      <div class="sidebar__footer">
+        <button class="btn btn--ghost" type="button" data-action="export">
+          <i data-lucide="download"></i>
+          <span>Export</span>
+        </button>
+        <!-- Import uses a hidden file input triggered by this button -->
+        <button class="btn btn--ghost" type="button" data-action="import">
+          <i data-lucide="upload"></i>
+          <span>Import</span>
+        </button>
+        <input type="file" accept="application/json,.json" data-mount="import-input" hidden />
+      </div>
+    </aside>
+
+    <!-- ============ 3. WORKSPACE (list + editor) ============ -->
+    <main class="workspace" data-view="list">
+      <!--
+        data-view on <main> is the master switch for mobile:
+          data-view="list"   → show the note list, hide the editor
+          data-view="editor" → show the editor, hide the list
+        On desktop CSS overrides this and shows both at once.
+      -->
+
+      <!-- --- Note list column --- -->
+      <section class="list-pane" aria-label="Notes">
+        <header class="list-pane__head">
+          <h1 class="list-pane__title" data-mount="list-title">All notes</h1>
+          <div class="list-pane__meta" data-mount="list-count"></div>
+        </header>
+
+        <ol class="note-list" id="note-list" data-mount="note-list">
+          <!-- ui.js renders note cards here -->
+        </ol>
+
+        <!-- Empty state. Hidden by default; ui.js toggles it when the list is empty. -->
+        <div class="empty" data-mount="list-empty" hidden>
+          <i data-lucide="feather" class="empty__icon"></i>
+          <p class="empty__title">Nothing here yet</p>
+          <p class="empty__hint">Your notes will show up in this space.</p>
+          <button class="btn btn--primary" type="button" data-action="new-note">
+            <i data-lucide="plus"></i>
+            <span>Write your first note</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- --- Editor column --- -->
+      <section class="editor-pane" aria-label="Editor" data-mount="editor" hidden>
+        <header class="editor-pane__bar">
+          <button
+            class="icon-btn editor-pane__back"
+            type="button"
+            data-action="close-editor"
+            aria-label="Back to notes"
+          >
+            <i data-lucide="arrow-left"></i>
+          </button>
+
+          <!-- Live save indicator. app.js flips its text/state on autosave. -->
+          <span class="save-status" data-mount="save-status" aria-live="polite">Saved</span>
+
+          <div class="editor-pane__tools">
+            <button class="icon-btn" type="button" data-action="toggle-pin" aria-label="Pin note" aria-pressed="false">
+              <i data-lucide="pin"></i>
+            </button>
+            <button class="icon-btn" type="button" data-action="move-note" aria-label="Move to folder">
+              <i data-lucide="folder"></i>
+            </button>
+            <button class="icon-btn icon-btn--danger" type="button" data-action="delete-note" aria-label="Delete note">
+              <i data-lucide="trash-2"></i>
+            </button>
+          </div>
+        </header>
+
+        <div class="editor">
+          <input
+            class="editor__title"
+            type="text"
+            data-mount="editor-title"
+            placeholder="Title"
+            aria-label="Note title"
+          />
+
+          <!-- Tag chips for the open note + an input to add more -->
+          <div class="editor__tags" data-mount="editor-tags">
+            <!-- ui.js renders chips; the input below adds new tags -->
+            <input
+              class="editor__tag-input"
+              type="text"
+              data-mount="editor-tag-input"
+              placeholder="Add tag…"
+              aria-label="Add tag"
+            />
+          </div>
+
+          <!-- The body. contenteditable-free: a plain textarea keeps things simple and reliable. -->
+          <textarea
+            class="editor__body"
+            data-mount="editor-body"
+            placeholder="Start writing…"
+            aria-label="Note body"
+            spellcheck="true"
+          ></textarea>
+        </div>
+      </section>
+
+      <!-- Editor empty state (desktop): shown when no note is selected -->
+      <div class="editor-placeholder" data-mount="editor-placeholder">
+        <i data-lucide="text-cursor" class="editor-placeholder__icon"></i>
+        <p>Select a note, or start a new one.</p>
+      </div>
+    </main>
+  </div>
+
+  <!-- ============ TOAST region ============ -->
+  <!-- Transient messages ("Note deleted", with an Undo). ui.js injects toasts here. -->
+  <div class="toast-region" data-mount="toasts" aria-live="assertive" aria-atomic="true"></div>
+
+  <!--
+    ENTRY POINT
+    app.js is a module, so it defers automatically and can `import` the
+    other modules (store, db, ui, utils). This single tag boots the app.
+  -->
+  <script type="module" src="app.js"></script>
+</body>
+</html>

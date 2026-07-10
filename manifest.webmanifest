@@ -1,0 +1,81 @@
+{
+  "//": "NoteFlow — Web App Manifest. This file makes the app INSTALLABLE. The browser reads it (linked from index.html) to learn the app's name, colors, icons, and how to launch it. Comments in JSON aren't standard, so these '//' keys are just ignored notes for you.",
+
+  "name": "NoteFlow",
+  "short_name": "NoteFlow",
+
+  "//description": "Shown in install prompts and app stores.",
+  "description": "A fast, offline-first note-taking app. Create, tag, pin, and organize your notes anywhere.",
+
+  "//display": "standalone = launches in its own window with NO browser address bar, so it feels like a native app. Alternatives: fullscreen, minimal-ui, browser.",
+  "display": "standalone",
+
+  "//display_override": "Progressive enhancement: try the newer 'window-controls-overlay' first, then fall back to standalone on browsers that don't support it.",
+  "display_override": ["standalone"],
+
+  "//orientation": "Let the device decide; notes read fine in portrait or landscape.",
+  "orientation": "any",
+
+  "//start_url": "Where the app opens when launched from the home screen. '.' means the app's own folder (relative), so it works no matter what path you host it under.",
+  "start_url": ".",
+
+  "//scope": "Which URLs belong to the app. '.' keeps everything under this folder in-app; links outside open in a normal browser tab.",
+  "scope": ".",
+
+  "//id": "A stable identity for the app so the browser doesn't treat it as a new install if start_url ever changes.",
+  "id": "/",
+
+  "//theme_color": "Tints the OS UI (status bar, title bar). Matches the light topbar surface in style.css.",
+  "theme_color": "#f7f6f9",
+
+  "//background_color": "The splash-screen background shown WHILE the app boots, before CSS loads. Match your app background to avoid a flash.",
+  "background_color": "#f7f6f9",
+
+  "//lang_dir": "Language + text direction for accessibility and correct rendering.",
+  "lang": "en",
+  "dir": "ltr",
+
+  "//categories": "Hints for app catalogs / stores.",
+  "categories": ["productivity", "utilities"],
+
+  "//icons": "PLACEHOLDERS for now. Drop real PNGs at these paths in an /icons folder. You need at least 192px and 512px. 'maskable' versions let Android crop them into any shape (circle, squircle) without clipping your logo — keep important art within the safe center ~80%. The 'any' purpose is for normal (non-masked) display.",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+
+  "//shortcuts": "Optional quick actions that appear when you long-press / right-click the installed app icon. This one jumps straight to creating a note. The 'new=1' param is a hint your app.js could read later to auto-open a fresh note.",
+  "shortcuts": [
+    {
+      "name": "New note",
+      "short_name": "New",
+      "description": "Start writing a new note",
+      "url": "./?new=1",
+      "icons": [
+        { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }
+      ]
+    }
+  ]
+}
