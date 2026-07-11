@@ -40,11 +40,12 @@
 
    â”€â”€ CHANGELOG â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
    v1 â†’ v2 : Phase 1 / Feature 1 (Export note as PDF).
-             index.html + app.js changed, so the shell must be
-             re-cached. Bumping the version does exactly that.
+             index.html + app.js changed.
+   v2 â†’ v3 : Phase 1 / Feature 2 (Export note as PNG/JPG image).
+             index.html + app.js changed (canvas image export).
    â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 */
-const CACHE_VERSION = 'v2';
+const CACHE_VERSION = 'v3';
 const CACHE_NAME = `noteflow-${CACHE_VERSION}`;
 
 /*
