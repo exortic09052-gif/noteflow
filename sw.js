@@ -1,5 +1,5 @@
 /* =============================================================
-   SLATE / NoteFlow — sw.js  (Service Worker)
+   NoteFlow â€” sw.js  (Service Worker)
    -------------------------------------------------------------
    A service worker is a script the browser runs IN THE BACKGROUND,
    separate from any page. It sits between the app and the network
@@ -7,21 +7,21 @@
    decide whether to answer from a CACHE or go to the network.
 
    That's what makes the app:
-     • OFFLINE-CAPABLE — the app shell is cached, so it loads with
+     â€¢ OFFLINE-CAPABLE â€” the app shell is cached, so it loads with
        no connection. (Your notes already live in IndexedDB, which
        works offline on its own, so together the app is fully usable
        with zero network.)
-     • INSTALLABLE — a registered SW + the manifest = installable PWA.
+     â€¢ INSTALLABLE â€” a registered SW + the manifest = installable PWA.
 
    -------------------------------------------------------------
    THE LIFECYCLE (three events, in order):
-     1. install   → pre-cache the app shell, then take over fast.
-     2. activate  → delete OLD caches from previous versions.
-     3. fetch     → answer requests from cache / network per strategy.
+     1. install   â†’ pre-cache the app shell, then take over fast.
+     2. activate  â†’ delete OLD caches from previous versions.
+     3. fetch     â†’ answer requests from cache / network per strategy.
    -------------------------------------------------------------
    Note: a service worker CANNOT use ES module imports the way our
    app files do, so this file is plain standalone JS. It also can't
-   touch the DOM — it only handles caching and network.
+   touch the DOM â€” it only handles caching and network.
    ============================================================= */
 
 
@@ -30,19 +30,25 @@
    The cache name carries a VERSION. This is the single most
    important habit for safe updates:
 
-     • Bump CACHE_VERSION whenever you change ANY shell file
-       (html/css/js/manifest). e.g. 'v1' → 'v2'.
-     • On the next visit, the new SW installs under the NEW cache
+     â€¢ Bump CACHE_VERSION whenever you change ANY shell file
+       (html/css/js/manifest). e.g. 'v1' â†’ 'v2'.
+     â€¢ On the next visit, the new SW installs under the NEW cache
        name, and 'activate' deletes every cache that isn't current.
 
    Result: users never get a half-old/half-new mix. Each version's
    files live in their own bucket, and stale buckets are purged.
+
+   â”€â”€ CHANGELOG â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+   v1 â†’ v2 : Phase 1 / Feature 1 (Export note as PDF).
+             index.html + app.js changed, so the shell must be
+             re-cached. Bumping the version does exactly that.
+   â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 */
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2';
 const CACHE_NAME = `noteflow-${CACHE_VERSION}`;
 
 /*
-   THE APP SHELL — the minimum set of files needed to boot the UI.
+   THE APP SHELL â€” the minimum set of files needed to boot the UI.
    We deliberately DON'T cache user data here (that's IndexedDB's
    job). Paths are relative so this works under any hosting path.
 */
@@ -64,7 +70,7 @@ const APP_SHELL = [
    Fires once when this SW version is first downloaded. We open
    the versioned cache and store the shell. addAll() is atomic:
    if ANY file fails to fetch, the whole install fails and this
-   SW never activates — so we never ship a broken partial cache.
+   SW never activates â€” so we never ship a broken partial cache.
 
    skipWaiting() tells the browser not to wait for old tabs to
    close before this SW takes control. Paired with clients.claim()
@@ -116,7 +122,7 @@ self.addEventListener('activate', (event) => {
         network and tuck a copy into the cache for next time
         (a.k.a. "stale-while-cache-fill").
 
-   We ignore non-GET requests (POST etc.) — those aren't cacheable.
+   We ignore non-GET requests (POST etc.) â€” those aren't cacheable.
 */
 self.addEventListener('fetch', (event) => {
   const { request } = event;
