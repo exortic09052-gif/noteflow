@@ -1,20 +1,14 @@
 /* =============================================================
    NoteFlow â€” app.js
    -------------------------------------------------------------
-   THE CONTROLLER. This is the "glue" that connects everything:
+   THE CONTROLLER. Glue between DOM events and store actions:
 
         DOM events  â†’  app.js  â†’  store actions  â†’  (store persists
         via db.js)  â†’  store notifies  â†’  ui.js re-renders.
 
-   app.js holds NO state of its own and does NO rendering. It only:
-     â€¢ boots the app (load Lucide, hydrate the store, first paint)
-     â€¢ listens for user events (ONE delegated click listener, plus
-       input/keydown handlers)
-     â€¢ translates each event into the correct store action
-     â€¢ wires autosave, keyboard shortcuts, import/export, undo
-
-   Read this file top-to-bottom like a story: boot first, then the
-   event wiring, then the individual handlers.
+   app.js holds NO state and does NO rendering. It boots the app,
+   listens for events (one delegated click listener + a few input
+   handlers), and translates each into the right store action.
    ============================================================= */
 
 import * as store from './store.js';
@@ -24,24 +18,12 @@ import { debounce, download, readFileAsText, $, mount } from './utils.js';
 
 /* =============================================================
    1. BOOT SEQUENCE
-   -------------------------------------------------------------
-   Runs once on load. Order matters:
-     1. make sure Lucide icons are available (for ui.js)
-     2. subscribe ui.render to the store (so changes repaint)
-     3. hydrate: pull notes/folders out of IndexedDB into state
-     4. wire up all event listeners
-     5. register the service worker (PWA offline support)
    ============================================================= */
 async function boot() {
   await ensureLucide();
-
-  // Whenever the store changes, ui.render runs with the new state.
   store.subscribe(ui.render);
-
-  // Reflect the current theme's icon (moon/sun) on first paint.
   ui.updateThemeIcon();
 
-  // Load persisted data â†’ triggers the first real render.
   try {
     await store.hydrate();
   } catch (err) {
@@ -53,17 +35,12 @@ async function boot() {
   registerServiceWorker();
 }
 
-/*
-   ensureLucide â€” the icon library is injected by the host as a
-   global (window.lucide). If it's not ready yet, wait briefly.
-   This keeps ui.js's refreshIcons() safe on the very first paint.
-*/
 function ensureLucide() {
   return new Promise((resolve) => {
     if (window.lucide) return resolve();
     let tries = 0;
     const timer = setInterval(() => {
-      if (window.lucide || tries++ > 40) { // ~2s max
+      if (window.lucide || tries++ > 40) {
         clearInterval(timer);
         resolve();
       }
@@ -74,27 +51,14 @@ function ensureLucide() {
 
 /* =============================================================
    2. EVENT WIRING
-   -------------------------------------------------------------
-   We attach a SMALL number of listeners at the document level and
-   let them handle everything via delegation. Why delegation?
-   Because ui.js constantly creates/destroys note cards, chips,
-   and toasts. If we bound listeners to each element, we'd have to
-   re-bind on every render. Instead we listen ONCE on a stable
-   parent and read data-action off whatever was clicked. New
-   elements "just work" with zero re-binding.
    ============================================================= */
 function wireEvents() {
-  // --- One click listener to rule them all. ---
   document.addEventListener('click', onClick);
 
-  // --- Editor typing â†’ autosave (input events). ---
   mount('editor-title').addEventListener('input', onEditorInput);
   mount('editor-body').addEventListener('input', onEditorInput);
-
-  // --- Tag input: Enter adds a tag. ---
   mount('editor-tag-input').addEventListener('keydown', onTagInputKeydown);
 
-  // --- Search box: live-filter as you type. ---
   const searchForm = $('[data-action="search"]');
   const searchInput = searchForm.querySelector('.search__input');
   searchInput.addEventListener('input', onSearchInput);
@@ -103,23 +67,15 @@ function wireEvents() {
     toggleSearchClear(searchInput);
   });
 
-  // --- Import file picker: fires when a file is chosen. ---
   mount('import-input').addEventListener('change', onImportFile);
-
-  // --- Global keyboard shortcuts. ---
   document.addEventListener('keydown', onGlobalKeydown);
 }
 
 
 /* =============================================================
-   3. THE DELEGATED CLICK HANDLER
-   -------------------------------------------------------------
-   Reads data-action from the clicked element (or its nearest
-   ancestor that has one) and routes to the matching store action.
-   This is the single "switchboard" for almost every button.
+   3. DELEGATED CLICK HANDLER
    ============================================================= */
 function onClick(event) {
-  // Find the nearest element carrying a data-action.
   const target = event.target.closest('[data-action]');
   if (!target) return;
 
@@ -129,7 +85,7 @@ function onClick(event) {
     /* --- creating --- */
     case 'new-note':
       store.createNote();
-      ui.closeSidebar(); // in case we're on mobile with the drawer open
+      ui.closeSidebar();
       break;
 
     case 'new-folder': {
@@ -155,7 +111,6 @@ function onClick(event) {
 
     /* --- note actions --- */
     case 'toggle-pin':
-      // Stop the click from ALSO opening the card underneath.
       event.stopPropagation();
       store.togglePin(id);
       break;
@@ -168,14 +123,30 @@ function onClick(event) {
       handleMove(id || mount('editor').dataset.id);
       break;
 
-    /* --- Phase 1 / Feature 1: export the open note as PDF --- */
+    /* --- Phase 1 / Feature 1: export as PDF --- */
     case 'export-pdf':
       handleExportPdf(id || mount('editor').dataset.id);
       break;
 
-    /* --- NEW (Phase 1 / Feature 2): export the open note as an image --- */
+    /* --- Phase 1 / Feature 2: export as image --- */
     case 'export-image':
       handleExportImage(id || mount('editor').dataset.id);
+      break;
+
+    /* --- Phase 1 / Feature 3: Trash & Restore â˜… NEW --- */
+    case 'restore-note':
+      event.stopPropagation();
+      store.restoreNote(id);
+      ui.toast('Note restored');
+      break;
+
+    case 'purge-note':
+      event.stopPropagation();
+      handlePurge(id);
+      break;
+
+    case 'empty-trash':
+      handleEmptyTrash();
       break;
 
     case 'close-editor':
@@ -209,39 +180,25 @@ function onClick(event) {
       ui.closeSidebar();
       break;
 
-    /* --- import / export --- */
+    /* --- import / export (JSON) --- */
     case 'export':
       handleExport();
       break;
     case 'import':
-      // Programmatically open the hidden file input.
       mount('import-input').click();
       break;
   }
 }
 
-/*
-   applyFilter â€” small adapter so the click handler stays clean.
-   'all'/'pinned' take no value; 'folder'/'tag' carry an id/tag.
-*/
 function applyFilter(type, value) {
   if (type === 'folder') store.setFilter('folder', value);
   else if (type === 'tag') store.setFilter('tag', value);
-  else store.setFilter(type); // 'all' | 'pinned'
+  else store.setFilter(type); // 'all' | 'pinned' | 'trash'
 }
 
 
 /* =============================================================
    4. AUTOSAVE (debounced)
-   -------------------------------------------------------------
-   As the user types in the title or body, we:
-     â€¢ immediately show "Savingâ€¦"
-     â€¢ wait until they PAUSE (debounce), then write once to the
-       store (which persists to IndexedDB) and show "Saved".
-
-   debounce (from utils.js) is what turns a burst of keystrokes
-   into a single save. 600ms feels responsive without hammering
-   the database on every letter.
    ============================================================= */
 const saveNow = debounce(async () => {
   const id = mount('editor').dataset.id;
@@ -255,7 +212,6 @@ const saveNow = debounce(async () => {
 }, 600);
 
 function onEditorInput() {
-  // Instant feedback that a save is coming; the real write is debounced.
   ui.setSaveStatus('saving');
   saveNow();
 }
@@ -265,7 +221,6 @@ function onEditorInput() {
    5. TAGS + SEARCH input handlers
    ============================================================= */
 function onTagInputKeydown(event) {
-  // Enter (or comma) commits the typed tag.
   if (event.key === 'Enter' || event.key === ',') {
     event.preventDefault();
     const input = event.currentTarget;
@@ -275,7 +230,6 @@ function onTagInputKeydown(event) {
       input.value = '';
     }
   }
-  // Backspace on an empty input removes the last tag (a nice touch).
   if (event.key === 'Backspace' && !event.currentTarget.value) {
     const note = store.getSelectedNote();
     if (note && note.tags.length) {
@@ -284,10 +238,6 @@ function onTagInputKeydown(event) {
   }
 }
 
-/*
-   Search is live but lightly debounced so very fast typing doesn't
-   trigger a re-render on literally every keystroke.
-*/
 const pushSearch = debounce((text) => store.setSearch(text), 120);
 
 function onSearchInput(event) {
@@ -296,7 +246,6 @@ function onSearchInput(event) {
   toggleSearchClear(input);
 }
 
-/* Show/hide the little "clear" (Ã—) button based on content. */
 function toggleSearchClear(input) {
   const clearBtn = input.parentElement.querySelector('.search__clear');
   if (clearBtn) clearBtn.hidden = input.value.length === 0;
@@ -304,18 +253,18 @@ function toggleSearchClear(input) {
 
 
 /* =============================================================
-   6. DELETE + UNDO
+   6. DELETE + UNDO  (now soft-delete â†’ Trash)
    -------------------------------------------------------------
-   store.deleteNote returns the removed note. We hand that to a
-   toast with an "Undo" action that simply restores it. The store
-   owns the data; app.js just orchestrates the offer to undo.
+   store.deleteNote soft-deletes (moves to Trash) and returns the
+   note. The Undo action restores it instantly. "Delete forever"
+   and "Empty trash" are the permanent operations below.
    ============================================================= */
 async function handleDelete(id) {
   if (!id) return;
   const removed = await store.deleteNote(id);
   if (!removed) return;
 
-  ui.toast('Note deleted', {
+  ui.toast('Moved to Trash', {
     actionLabel: 'Undo',
     onAction: () => store.restoreNote(removed),
     duration: 6000,
@@ -323,9 +272,30 @@ async function handleDelete(id) {
 }
 
 /*
-   handleMove â€” pick a destination folder for a note. We keep the
-   UI dependency-free with a numbered prompt (0 = no folder). A
-   nicer popover could replace this later without touching store.
+   handlePurge â€” permanent, single-note delete from the Trash view.
+   We confirm first because it can't be undone.
+*/
+async function handlePurge(id) {
+  if (!id) return;
+  const ok = confirm('Delete this note forever? This cannot be undone.');
+  if (!ok) return;
+  await store.purgeNote(id);
+  ui.toast('Note permanently deleted');
+}
+
+/*
+   handleEmptyTrash â€” permanently delete every trashed note.
+   Confirmed, and reports how many were removed.
+*/
+async function handleEmptyTrash() {
+  const ok = confirm('Empty the Trash? All notes in it will be permanently deleted.');
+  if (!ok) return;
+  const count = await store.emptyTrash();
+  ui.toast(count ? `Deleted ${count} note${count === 1 ? '' : 's'}` : 'Trash is already empty');
+}
+
+/*
+   handleMove â€” pick a destination folder via a numbered prompt.
 */
 function handleMove(id) {
   if (!id) return;
@@ -348,13 +318,7 @@ function handleMove(id) {
 
 
 /* =============================================================
-   6b. EXPORT NOTE AS PDF   â˜… Phase 1 / Feature 1
-   -------------------------------------------------------------
-   Strategy: use the BROWSER'S NATIVE print-to-PDF instead of a
-   third-party library. Zero dependencies, real selectable text,
-   proper pagination, works on Android (Print â†’ "Save as PDF").
-   Renders into a hidden iframe (popups are unreliable in a PWA).
-   Pure READ action â€” no store/db/schema involvement.
+   6b. EXPORT NOTE AS PDF   (Phase 1 / Feature 1)
    ============================================================= */
 function handleExportPdf(id) {
   const note = store.getSelectedNote();
@@ -366,11 +330,6 @@ function handleExportPdf(id) {
   printViaIframe(html, () => ui.toast('Opening printâ€¦ choose â€œSave as PDFâ€.'));
 }
 
-/*
-   escapeHtml â€” turn user text into safe HTML for the print doc.
-   Converts < > & " ' so note content renders literally (XSS-safe,
-   same principle ui.js uses with textContent).
-*/
 function escapeHtml(text = '') {
   return text
     .replace(/&/g, '&amp;')
@@ -380,10 +339,6 @@ function escapeHtml(text = '') {
     .replace(/'/g, '&#39;');
 }
 
-/*
-   humanDateLine(note) â€” a friendly date string used by both PDF
-   and image export. Shows created + updated when they differ.
-*/
 function humanDateLine(note) {
   const created = note.createdAt ? new Date(note.createdAt) : null;
   const updated = note.updatedAt ? new Date(note.updatedAt) : null;
@@ -399,10 +354,6 @@ function humanDateLine(note) {
   return '';
 }
 
-/*
-   noteDisplayTitle(note) â€” the title, falling back to the first
-   body line, then "Untitled note". Shared by both exporters.
-*/
 function noteDisplayTitle(note) {
   return (
     (note.title && note.title.trim()) ||
@@ -411,26 +362,16 @@ function noteDisplayTitle(note) {
   );
 }
 
-/*
-   safeFilename(text) â€” turn a title into a filesystem-friendly
-   name for downloads (letters/numbers/dashes only).
-*/
 function safeFilename(text = 'note') {
   return (
     text.trim().toLowerCase()
-      .replace(/[^\w\s-]/g, '')  // drop punctuation
-      .replace(/\s+/g, '-')       // spaces â†’ dashes
-      .replace(/-+/g, '-')        // collapse repeats
+      .replace(/[^\w\s-]/g, '')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
       .slice(0, 48) || 'note'
   );
 }
 
-/*
-   buildPrintDocument(note) â€” full standalone HTML for print.
-   Own light styling so the PDF is consistent regardless of theme.
-   Page-break rules: even @page margins, header kept together,
-   orphans/widows control, long words wrap.
-*/
 function buildPrintDocument(note) {
   const title = escapeHtml(noteDisplayTitle(note));
   const body = escapeHtml(note.body || '');
@@ -476,11 +417,6 @@ function buildPrintDocument(note) {
 </html>`;
 }
 
-/*
-   printViaIframe(html, onReady) â€” render HTML in a hidden iframe
-   and trigger print. Iframe (not window.open) keeps this working
-   inside an installed PWA and avoids popup blockers.
-*/
 function printViaIframe(html, onReady) {
   const iframe = document.createElement('iframe');
   iframe.style.position = 'fixed';
@@ -519,23 +455,7 @@ function printViaIframe(html, onReady) {
 
 
 /* =============================================================
-   6c. EXPORT NOTE AS IMAGE (PNG/JPG)   â˜… NEW Phase 1 / Feature 2
-   -------------------------------------------------------------
-   Strategy: draw the note onto an HTML <canvas> ourselves, then
-   save the canvas as an image. No libraries â†’ stays offline.
-
-   Why canvas (not html2canvas): zero dependencies, pixel-perfect,
-   and we scale the canvas by devicePixelRatio so text is CRISP on
-   phones/retina screens.
-
-   Flow:
-     1. Measure how tall the note will be (wrap the body text to a
-        fixed content width and count the resulting lines).
-     2. Size the canvas (scaled for retina), paint background,
-        title, meta/tags, then each wrapped line.
-     3. Convert to a Blob and download as .png or .jpg.
-
-   Pure READ action â€” no store/db/schema involvement.
+   6c. EXPORT NOTE AS IMAGE (PNG/JPG)   (Phase 1 / Feature 2)
    ============================================================= */
 async function handleExportImage(id) {
   const note = store.getSelectedNote();
@@ -544,7 +464,6 @@ async function handleExportImage(id) {
     return;
   }
 
-  // Ask which format. OK = PNG (crisp, larger), Cancel = JPG (smaller).
   const wantPng = confirm(
     'Export as image:\n\nOK = PNG (sharp text, larger file)\nCancel = JPG (smaller file)'
   );
@@ -561,11 +480,6 @@ async function handleExportImage(id) {
   }
 }
 
-/*
-   downloadBlob(blob, filename) â€” trigger a download for a binary
-   Blob (the image). Mirrors utils.download, which is text-only.
-   We create a temporary object URL, click a link, then revoke it.
-*/
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -577,20 +491,12 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
-/*
-   wrapText(ctx, text, maxWidth) â€” split text into lines that fit
-   within maxWidth, respecting existing newlines. Returns an array
-   of line strings. This is the core of laying text on a canvas
-   (canvas has no automatic word-wrap; we do it by measuring).
-*/
 function wrapText(ctx, text, maxWidth) {
   const lines = [];
-  // Preserve the user's own line breaks firstâ€¦
   for (const rawLine of String(text).split('\n')) {
-    if (rawLine === '') { lines.push(''); continue; } // keep blank lines
-    // â€¦then wrap each paragraph by words.
+    if (rawLine === '') { lines.push(''); continue; }
     let current = '';
-    for (const word of rawLine.split(/(\s+)/)) { // keep spaces as tokens
+    for (const word of rawLine.split(/(\s+)/)) {
       const trial = current + word;
       if (ctx.measureText(trial).width > maxWidth && current) {
         lines.push(current.trimEnd());
@@ -604,16 +510,10 @@ function wrapText(ctx, text, maxWidth) {
   return lines;
 }
 
-/*
-   renderNoteToImageBlob(note, format) â€” the actual drawing.
-   Returns a Promise<Blob>. All sizes are in CSS pixels; we multiply
-   by `scale` for the physical canvas so it's sharp on retina.
-*/
 function renderNoteToImageBlob(note, format) {
   return new Promise((resolve, reject) => {
-    // --- Layout constants (CSS px) ---
-    const scale = Math.min(window.devicePixelRatio || 1, 3); // cap at 3x
-    const width = 800;          // fixed card width
+    const scale = Math.min(window.devicePixelRatio || 1, 3);
+    const width = 800;
     const padding = 56;
     const contentW = width - padding * 2;
 
@@ -622,11 +522,9 @@ function renderNoteToImageBlob(note, format) {
     const bodyFont = '400 19px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
     const titleLH = 42, metaLH = 22, bodyLH = 30;
 
-    // A temporary context just for measuring/wrapping.
     const measureCanvas = document.createElement('canvas');
     const mctx = measureCanvas.getContext('2d');
 
-    // --- Wrap each text block to know the total height ---
     mctx.font = titleFont;
     const titleLines = wrapText(mctx, noteDisplayTitle(note), contentW);
 
@@ -636,33 +534,26 @@ function renderNoteToImageBlob(note, format) {
     mctx.font = bodyFont;
     const bodyLines = wrapText(mctx, note.body || '', contentW);
 
-    // --- Compute total canvas height from the pieces ---
     let y = padding;
     y += titleLines.length * titleLH;
-    y += 10; // gap after title
+    y += 10;
     if (dateLine) y += metaLH;
     if (tagsLine) y += metaLH;
-    y += 18; // gap before divider
-    y += 1 + 22; // divider + gap
-    const bodyStart = y;
+    y += 18;
+    y += 1 + 22;
     y += bodyLines.length * bodyLH;
-    y += padding; // bottom padding
+    y += padding;
     const height = Math.max(y, 240);
 
-    // --- Create the real, retina-scaled canvas ---
     const canvas = document.createElement('canvas');
     canvas.width = Math.round(width * scale);
     canvas.height = Math.round(height * scale);
     const ctx = canvas.getContext('2d');
-    ctx.scale(scale, scale); // now we can draw in CSS px
+    ctx.scale(scale, scale);
 
-    // Background. JPG has no transparency, so always paint white;
-    // PNG gets white too for a clean "card" look (change to leave
-    // transparent if you prefer).
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, width, height);
 
-    // --- Draw title ---
     ctx.textBaseline = 'top';
     ctx.fillStyle = '#1c1a22';
     ctx.font = titleFont;
@@ -673,7 +564,6 @@ function renderNoteToImageBlob(note, format) {
     }
     cursorY += 10;
 
-    // --- Draw meta (date + tags) ---
     ctx.font = metaFont;
     if (dateLine) {
       ctx.fillStyle = '#6b6676';
@@ -687,7 +577,6 @@ function renderNoteToImageBlob(note, format) {
     }
     cursorY += 18;
 
-    // --- Divider line ---
     ctx.strokeStyle = '#e2dfe8';
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -696,7 +585,6 @@ function renderNoteToImageBlob(note, format) {
     ctx.stroke();
     cursorY += 22;
 
-    // --- Draw body ---
     ctx.font = bodyFont;
     ctx.fillStyle = '#2c2933';
     for (const line of bodyLines) {
@@ -704,7 +592,6 @@ function renderNoteToImageBlob(note, format) {
       cursorY += bodyLH;
     }
 
-    // --- Export to a Blob ---
     const mime = format === 'png' ? 'image/png' : 'image/jpeg';
     const quality = format === 'png' ? undefined : 0.92;
     canvas.toBlob(
@@ -718,15 +605,10 @@ function renderNoteToImageBlob(note, format) {
 
 /* =============================================================
    7. EXPORT / IMPORT (JSON backup of ALL notes)
-   -------------------------------------------------------------
-   Export: ask the store to serialize, then trigger a download.
-   Import: read the chosen file, parse JSON, ask whether to merge
-   or replace, and hand it to the store. All the data logic lives
-   in store.js; app.js only handles the file plumbing + prompts.
    ============================================================= */
 function handleExport() {
   const data = store.toJSON();
-  const stamp = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const stamp = new Date().toISOString().slice(0, 10);
   download(`slate-backup-${stamp}.json`, JSON.stringify(data, null, 2));
   ui.toast('Exported your notes');
 }
@@ -739,7 +621,6 @@ async function onImportFile(event) {
     const text = await readFileAsText(file);
     const data = JSON.parse(text);
 
-    // Ask how to bring the data in. OK = replace, Cancel = merge.
     const replace = confirm(
       'Import notes.\n\nOK = REPLACE everything with this file.\nCancel = MERGE into your current notes.'
     );
@@ -750,7 +631,6 @@ async function onImportFile(event) {
     console.error(err);
     ui.toast(err.message || 'Could not import that file.');
   } finally {
-    // Reset the input so choosing the same file again still fires.
     event.target.value = '';
   }
 }
@@ -758,10 +638,6 @@ async function onImportFile(event) {
 
 /* =============================================================
    8. THEME TOGGLE
-   -------------------------------------------------------------
-   Flip data-theme on <html>, persist the choice, and update the
-   icon. The inline script in index.html already applied the saved
-   theme before paint; this just lets the user change it.
    ============================================================= */
 function toggleTheme() {
   const root = document.documentElement;
@@ -774,12 +650,6 @@ function toggleTheme() {
 
 /* =============================================================
    9. KEYBOARD SHORTCUTS
-   -------------------------------------------------------------
-     Ctrl/Cmd + K  â†’ focus search
-     Ctrl/Cmd + N  â†’ new note
-     Escape        â†’ close editor (mobile) or clear search focus
-   We ignore shortcuts while typing in a field (except Escape and
-   the search/new combos, which use a modifier so they're safe).
    ============================================================= */
 function onGlobalKeydown(event) {
   const mod = event.metaKey || event.ctrlKey;
@@ -797,7 +667,6 @@ function onGlobalKeydown(event) {
   }
 
   if (event.key === 'Escape') {
-    // If a note is open on mobile, Escape backs out to the list.
     if (store.getView().selectedId) store.selectNote(null);
     ui.closeSidebar();
   }
@@ -806,14 +675,9 @@ function onGlobalKeydown(event) {
 
 /* =============================================================
    10. SERVICE WORKER (PWA)
-   -------------------------------------------------------------
-   Registers sw.js (File 9) so the app works offline and is
-   installable. Wrapped in a guard so a missing SW never breaks
-   the app during local development.
    ============================================================= */
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
-  // Register after load so it never competes with first paint.
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js').catch((err) => {
       console.warn('Service worker registration failed:', err);
