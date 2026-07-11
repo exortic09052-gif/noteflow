@@ -1,25 +1,22 @@
 /* =============================================================
-   SLATE — store.js
+   NoteFlow â€” store.js
    -------------------------------------------------------------
    THE SINGLE SOURCE OF TRUTH.
 
    Everything the UI shows is derived from the `state` object in
    this file. The rules that keep the app sane:
 
-     • Nobody outside this file mutates `state` directly.
-       They call actions here (createNote, togglePin, setSearch…).
-     • Every action that changes data does TWO things, in order:
+     â€¢ Nobody outside this file mutates `state` directly.
+       They call actions here (createNote, togglePin, setSearchâ€¦).
+     â€¢ Every action that changes data does TWO things, in order:
          1. update the in-memory `state`   (instant, for the UI)
          2. persist the change via db.js    (durable, on disk)
        Then it notifies subscribers so the UI re-renders.
-     • The DB is the durable copy; `state` is the fast working
+     â€¢ The DB is the durable copy; `state` is the fast working
        copy. On startup we load the DB INTO state once (hydrate).
 
-   This is a mini "flux" pattern: state + actions + a subscribe()
-   so ui.js can react. No framework required.
-
    -------------------------------------------------------------
-   DATA SHAPES (so you know exactly what a note/folder looks like)
+   DATA SHAPES
    -------------------------------------------------------------
    Note = {
      id:        string,        // uid()
@@ -30,6 +27,7 @@
      pinned:    boolean,
      createdAt: number,        // ms timestamp
      updatedAt: number,        // ms timestamp
+     deletedAt: number | null, // â˜… NEW: null = alive, number = in Trash
    }
 
    Folder = {
@@ -37,6 +35,15 @@
      name: string,
      createdAt: number,
    }
+
+   -------------------------------------------------------------
+   â˜… TRASH MODEL (Phase 1 / Feature 3)
+   -------------------------------------------------------------
+   "Deleting" a note now SOFT-deletes it: we stamp deletedAt with
+   the current time. Trashed notes are hidden everywhere except
+   the Trash view. From Trash you can RESTORE (clear deletedAt) or
+   DELETE FOREVER (purge = real DB removal). Backward compatible:
+   notes without deletedAt are treated as alive.
    ============================================================= */
 
 import * as db from './db.js';
@@ -44,20 +51,6 @@ import { uid, now, normalizeTag, matchesQuery, deriveTitle } from './utils.js';
 
 
 /* ============ 1. STATE STRUCTURE ============ */
-/*
-   `state` holds two kinds of things:
-
-     A. DATA loaded from the database:
-          notes, folders
-
-     B. UI / VIEW state — what the user is currently looking at:
-          filter    → which slice of notes to show
-          search    → the current search text
-          selectedId → the note open in the editor (or null)
-
-   Keeping view-state HERE (not scattered in the DOM) means the
-   whole app can be re-rendered from this one object at any time.
-*/
 const state = {
   // --- data ---
   notes: [],    // array of Note objects (unsorted; we sort on read)
@@ -65,10 +58,11 @@ const state = {
 
   // --- current view ---
   filter: { type: 'all', value: null },
-  //   type: 'all'    → every note              (value ignored)
-  //   type: 'pinned' → only pinned notes       (value ignored)
-  //   type: 'folder' → notes in a folder       (value = folderId)
-  //   type: 'tag'    → notes with a tag        (value = tag string)
+  //   type: 'all'    â†’ every LIVE note              (value ignored)
+  //   type: 'pinned' â†’ only pinned LIVE notes       (value ignored)
+  //   type: 'folder' â†’ LIVE notes in a folder       (value = folderId)
+  //   type: 'tag'    â†’ LIVE notes with a tag        (value = tag string)
+  //   type: 'trash'  â†’ only TRASHED notes           (value ignored) â˜… NEW
 
   search: '',        // current search query text
   selectedId: null,  // id of the note open in the editor
@@ -76,17 +70,10 @@ const state = {
 
 
 /* ============ 2. SUBSCRIBE / NOTIFY ============ */
-/*
-   A dead-simple pub/sub. ui.js calls subscribe(render) once.
-   Every action calls notify() after changing state, which runs
-   all listeners. This is how the UI stays in sync automatically:
-   change state → notify → UI re-renders from state.
-*/
 const listeners = new Set();
 
 export function subscribe(fn) {
   listeners.add(fn);
-  // Return an "unsubscribe" function in case it's ever needed.
   return () => listeners.delete(fn);
 }
 
@@ -95,43 +82,41 @@ function notify() {
 }
 
 
-/* ============ 3. READ HELPERS (derived views) ============ */
-/*
-   These do NOT change state. They COMPUTE what the UI needs from
-   the raw data + current view settings. Keeping derivation here
-   (not in ui.js) means the display logic is testable and the UI
-   stays "dumb": it just renders whatever these return.
-*/
+/* ============ 3. READ HELPERS ============ */
 
-/** The full, unfiltered note array (rarely needed directly). */
+/*
+   Small internal predicate: is a note "alive" (not trashed)?
+   Treating a MISSING deletedAt as alive is what keeps old notes
+   and old backups working with zero migration.
+*/
+function isAlive(note) {
+  return !note.deletedAt;
+}
+
 export function getAllNotes() {
   return state.notes;
 }
 
-/** The note currently open in the editor, or null. */
 export function getSelectedNote() {
   return state.notes.find((n) => n.id === state.selectedId) || null;
 }
 
-/** The current view settings (filter + search) — handy for the UI title. */
 export function getView() {
   return { filter: state.filter, search: state.search, selectedId: state.selectedId };
 }
 
-/** All folders (for the sidebar). */
 export function getFolders() {
   return state.folders;
 }
 
 /*
-   getTagCounts() — build the tag cloud data.
-   Returns [{ tag, count }] sorted by count (desc), then name.
-   Derived fresh each call so it's always accurate. Adding tags
-   elsewhere needs NO change here — it just recounts.
+   getTagCounts() â€” tag cloud data. Excludes trashed notes so the
+   cloud reflects only live content.
 */
 export function getTagCounts() {
   const counts = new Map();
   for (const note of state.notes) {
+    if (!isAlive(note)) continue; // skip trashed
     for (const tag of note.tags || []) {
       counts.set(tag, (counts.get(tag) || 0) + 1);
     }
@@ -140,52 +125,60 @@ export function getTagCounts() {
     .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
 }
 
-/* Count helper for the sidebar "All"/"Pinned"/folder badges. */
+/*
+   getCounts() â€” sidebar badges. Live counts exclude trashed
+   notes; `trash` counts only trashed ones.
+*/
 export function getCounts() {
+  const live = state.notes.filter(isAlive);
   return {
-    all: state.notes.length,
-    pinned: state.notes.filter((n) => n.pinned).length,
-    byFolder: (folderId) => state.notes.filter((n) => n.folderId === folderId).length,
+    all: live.length,
+    pinned: live.filter((n) => n.pinned).length,
+    trash: state.notes.length - live.length,           // â˜… NEW
+    byFolder: (folderId) => live.filter((n) => n.folderId === folderId).length,
   };
 }
 
 
 /* ============ 4. FILTER + SEARCH + SORT ============ */
 /*
-   getVisibleNotes() is the heart of the read side. It applies,
-   in order:
-       1. the active FILTER  (all / pinned / folder / tag)
-       2. the SEARCH query   (via matchesQuery from utils.js)
-       3. SORTING             (pinned first, then most-recent)
-
-   The UI calls this to know exactly what cards to draw. To add a
-   NEW filter type later (say "archived"), you add one `case` in
-   step 1 and nothing else in this function changes.
+   getVisibleNotes() applies, in order:
+     1. FILTER  (all / pinned / folder / tag / trash)
+        - Trash view shows ONLY trashed notes.
+        - Every other view shows ONLY live notes.
+     2. SEARCH  (via matchesQuery)
+     3. SORT
+        - Trash: most-recently-trashed first.
+        - Others: pinned first, then most-recently-updated.
 */
 export function getVisibleNotes() {
   const { filter, search } = state;
 
   // --- 1. FILTER ---
-  let list = state.notes.filter((note) => {
-    switch (filter.type) {
-      case 'pinned':
-        return note.pinned;
-      case 'folder':
-        return note.folderId === filter.value;
-      case 'tag':
-        return (note.tags || []).includes(filter.value);
-      case 'all':
-      default:
-        return true;
-    }
-  });
+  let list;
+  if (filter.type === 'trash') {
+    // Only trashed notes here.
+    list = state.notes.filter((note) => !isAlive(note));
+  } else {
+    // Everywhere else: only live notes, then the specific filter.
+    list = state.notes.filter(isAlive).filter((note) => {
+      switch (filter.type) {
+        case 'pinned': return note.pinned;
+        case 'folder': return note.folderId === filter.value;
+        case 'tag':    return (note.tags || []).includes(filter.value);
+        case 'all':
+        default:       return true;
+      }
+    });
+  }
 
   // --- 2. SEARCH ---
-  // matchesQuery handles the empty-query case (returns everything).
   list = list.filter((note) => matchesQuery(note, search));
 
-  // --- 3. SORT: pinned first, then newest updated first ---
-  // Copy before sorting so we never mutate state.notes in place.
+  // --- 3. SORT (copy first so we never mutate state.notes) ---
+  if (filter.type === 'trash') {
+    return [...list].sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0));
+  }
   return [...list].sort((a, b) => {
     if (a.pinned !== b.pinned) return a.pinned ? -1 : 1; // pinned to the top
     return b.updatedAt - a.updatedAt;                    // newer first
@@ -193,49 +186,30 @@ export function getVisibleNotes() {
 }
 
 
-/* ============ 5. VIEW ACTIONS (change what's shown) ============ */
-/*
-   These change VIEW state only — no database writes, because
-   nothing about the notes themselves changed.
-*/
-
-/** Switch the active filter, e.g. setFilter('folder', someFolderId). */
+/* ============ 5. VIEW ACTIONS ============ */
 export function setFilter(type, value = null) {
   state.filter = { type, value };
   notify();
 }
 
-/** Reset to the default "All notes" view and clear search. */
 export function clearFilters() {
   state.filter = { type: 'all', value: null };
   state.search = '';
   notify();
 }
 
-/** Update the live search text (called on every keystroke by app.js). */
 export function setSearch(text) {
   state.search = text;
   notify();
 }
 
-/** Open a note in the editor (or pass null to close it). */
 export function selectNote(id) {
   state.selectedId = id;
   notify();
 }
 
 
-/* ============ 6. DATA ACTIONS (change notes → also persist) ============ */
-/*
-   Pattern for EVERY data action:
-     1. mutate state (so the UI updates instantly / optimistically)
-     2. await db.* to persist
-     3. notify() so listeners re-render
-
-   We update state BEFORE awaiting the DB so the UI feels instant.
-   If a write ever failed, we'd surface it — for a local single
-   device app, IndexedDB failures are rare (mostly quota).
-*/
+/* ============ 6. DATA ACTIONS ============ */
 
 /** Create a brand-new empty note, select it, and persist. Returns it. */
 export async function createNote(partial = {}) {
@@ -245,12 +219,12 @@ export async function createNote(partial = {}) {
     title: '',
     body: '',
     tags: [],
-    // If we're inside a folder view, new notes land in that folder.
     folderId: state.filter.type === 'folder' ? state.filter.value : null,
     pinned: false,
     createdAt: timestamp,
     updatedAt: timestamp,
-    ...partial, // caller can override any of the above
+    deletedAt: null, // â˜… alive by default
+    ...partial,
   };
 
   state.notes.push(note);
@@ -261,16 +235,11 @@ export async function createNote(partial = {}) {
   return note;
 }
 
-/*
-   updateNote(id, changes) — patch fields on a note.
-   Used by autosave (title/body) and by tag edits. It merges the
-   `changes` object over the existing note and bumps updatedAt.
-*/
+/** Patch fields on a note (used by autosave and tag edits). */
 export async function updateNote(id, changes) {
   const note = state.notes.find((n) => n.id === id);
   if (!note) return null;
 
-  // Merge changes in place, then refresh the "last edited" time.
   Object.assign(note, changes, { updatedAt: now() });
 
   notify();
@@ -289,50 +258,86 @@ export async function togglePin(id) {
 }
 
 /*
-   deleteNote(id) — remove a note.
-   Returns the deleted note so the caller (app.js) can offer an
-   "Undo" toast by re-creating it. If the deleted note was open,
-   we close the editor.
+   deleteNote(id) â€” â˜… SOFT delete.
+   Stamps deletedAt so the note moves to Trash (still in the DB,
+   just flagged). If it was open in the editor, close the editor.
+   Returns the note so app.js can offer an Undo (which restores it).
 */
 export async function deleteNote(id) {
-  const index = state.notes.findIndex((n) => n.id === id);
-  if (index === -1) return null;
+  const note = state.notes.find((n) => n.id === id);
+  if (!note) return null;
 
-  const [removed] = state.notes.splice(index, 1);
+  note.deletedAt = now();
   if (state.selectedId === id) state.selectedId = null;
 
   notify();
-  await db.deleteNote(id);
-  return removed;
+  await db.putNote(note); // persist the flag (NOT a real delete)
+  return note;
 }
 
 /*
-   restoreNote(note) — put a previously deleted note back.
-   Powers the "Undo" action on the delete toast.
+   restoreNote(idOrNote) â€” â˜… clear deletedAt so the note returns
+   to its normal place. Accepts either a note id or a note object
+   (the Undo toast passes the object it received from deleteNote).
 */
-export async function restoreNote(note) {
-  state.notes.push(note);
+export async function restoreNote(idOrNote) {
+  const id = typeof idOrNote === 'string' ? idOrNote : idOrNote && idOrNote.id;
+  const note = state.notes.find((n) => n.id === id);
+  if (!note) return;
+
+  note.deletedAt = null;
+  note.updatedAt = now();
   notify();
   await db.putNote(note);
 }
 
+/*
+   purgeNote(id) â€” â˜… PERMANENT delete (Delete forever).
+   Removes the note from state AND from IndexedDB. Not reversible.
+*/
+export async function purgeNote(id) {
+  const index = state.notes.findIndex((n) => n.id === id);
+  if (index === -1) return;
+
+  state.notes.splice(index, 1);
+  if (state.selectedId === id) state.selectedId = null;
+
+  notify();
+  await db.deleteNote(id); // the real DB removal (db.js unchanged)
+}
+
+/*
+   emptyTrash() â€” â˜… permanently delete EVERY trashed note.
+   Returns how many were purged (for a confirmation toast).
+*/
+export async function emptyTrash() {
+  const trashed = state.notes.filter((n) => !isAlive(n));
+  if (trashed.length === 0) return 0;
+
+  const ids = new Set(trashed.map((n) => n.id));
+  state.notes = state.notes.filter((n) => !ids.has(n.id));
+  if (ids.has(state.selectedId)) state.selectedId = null;
+
+  // If we were viewing Trash, it's now empty â€” stay put; the view
+  // will just show its empty state.
+  notify();
+
+  // Persist: remove each from the DB.
+  for (const id of ids) {
+    await db.deleteNote(id);
+  }
+  return trashed.length;
+}
+
 
 /* ============ 7. TAG ACTIONS ============ */
-/*
-   Tags live ON each note (note.tags is a string array). There is
-   no separate "tags table" — the tag cloud is DERIVED by
-   getTagCounts(). That's the beginner-friendly choice: adding or
-   removing a tag is just editing an array on one note.
-*/
-
-/** Add a tag to a note (normalized, no duplicates). */
 export async function addTag(id, rawTag) {
   const note = state.notes.find((n) => n.id === id);
   if (!note) return;
 
   const tag = normalizeTag(rawTag);
-  if (!tag) return;                       // ignore empty/garbage input
-  if (note.tags.includes(tag)) return;    // no duplicates
+  if (!tag) return;
+  if (note.tags.includes(tag)) return;
 
   note.tags = [...note.tags, tag];
   note.updatedAt = now();
@@ -340,7 +345,6 @@ export async function addTag(id, rawTag) {
   await db.putNote(note);
 }
 
-/** Remove a tag from a note. */
 export async function removeTag(id, tag) {
   const note = state.notes.find((n) => n.id === id);
   if (!note) return;
@@ -352,8 +356,6 @@ export async function removeTag(id, tag) {
 
 
 /* ============ 8. FOLDER ACTIONS ============ */
-
-/** Create a folder and persist it. Returns it. */
 export async function createFolder(name) {
   const folder = { id: uid(), name: name.trim() || 'New folder', createdAt: now() };
   state.folders.push(folder);
@@ -362,7 +364,6 @@ export async function createFolder(name) {
   return folder;
 }
 
-/** Rename a folder. */
 export async function renameFolder(id, name) {
   const folder = state.folders.find((f) => f.id === id);
   if (!folder) return;
@@ -372,10 +373,8 @@ export async function renameFolder(id, name) {
 }
 
 /*
-   deleteFolder(id) — remove a folder.
-   Notes inside it are NOT deleted; they're moved back to "no
-   folder" (folderId = null) so nothing is lost. Each affected
-   note is re-saved. If we were viewing that folder, reset to All.
+   deleteFolder(id) â€” remove a folder. Notes inside are NOT
+   deleted; they move back to "no folder" (folderId = null).
 */
 export async function deleteFolder(id) {
   state.folders = state.folders.filter((f) => f.id !== id);
@@ -391,12 +390,10 @@ export async function deleteFolder(id) {
   }
 
   notify();
-  // Persist: delete the folder, and re-save every note we touched.
   await db.deleteFolder(id);
   await db.bulkPutNotes(affected);
 }
 
-/** Move a note into a folder (or pass null to remove it from any folder). */
 export async function moveNote(id, folderId) {
   const note = state.notes.find((n) => n.id === id);
   if (!note) return;
@@ -407,52 +404,33 @@ export async function moveNote(id, folderId) {
 }
 
 
-/* ============ 9. HYDRATE (load DB → state on startup) ============ */
-/*
-   Called once by app.js when the app boots. It pulls everything
-   out of IndexedDB into `state`, then notifies so the UI paints.
-   After this, `state` and the DB stay in lock-step because every
-   data action writes to both.
-*/
+/* ============ 9. HYDRATE ============ */
 export async function hydrate() {
   const [notes, folders] = await Promise.all([
     db.getAllNotes(),
     db.getAllFolders(),
   ]);
-  state.notes = notes || [];
-  state.folders = folders || [];
+  // Normalize on load so legacy notes gain deletedAt = null, etc.
+  state.notes = (notes || []).map(normalizeNote);
+  state.folders = (folders || []).map(normalizeFolder);
   notify();
 }
 
 
-/* ============ 10. EXPORT / IMPORT (backup as JSON) ============ */
-/*
-   toJSON() serializes everything into one portable object.
-   We stamp a version + exportedAt so future imports can migrate
-   old backups if the shape ever changes.
-*/
+/* ============ 10. EXPORT / IMPORT ============ */
 export function toJSON() {
   return {
     app: 'slate',
     version: 1,
     exportedAt: now(),
-    notes: state.notes,
+    notes: state.notes,   // deletedAt travels with each note automatically
     folders: state.folders,
   };
 }
 
-/*
-   importJSON(data, { replace }) — load a backup.
-     • replace = true  → wipe existing data first, then load.
-     • replace = false → merge: imported items overwrite matching
-                          ids, new ids are added.
-   We validate lightly and normalize each record so a hand-edited
-   or older file can't corrupt the app.
-*/
 export async function importJSON(data, { replace = false } = {}) {
-  // Basic shape check — bail clearly if this isn't our format.
   if (!data || !Array.isArray(data.notes)) {
-    throw new Error('That file doesn’t look like a Slate export.');
+    throw new Error('That file doesnâ€™t look like a NoteFlow export.');
   }
 
   const incomingNotes = data.notes.map(normalizeNote);
@@ -465,7 +443,6 @@ export async function importJSON(data, { replace = false } = {}) {
     state.notes = incomingNotes;
     state.folders = incomingFolders;
   } else {
-    // Merge by id: build maps so incoming records overwrite dupes.
     const noteMap = new Map(state.notes.map((n) => [n.id, n]));
     for (const n of incomingNotes) noteMap.set(n.id, n);
     state.notes = Array.from(noteMap.values());
@@ -476,16 +453,15 @@ export async function importJSON(data, { replace = false } = {}) {
   }
 
   notify();
-  // Persist the whole new set in bulk.
   await db.bulkPutFolders(state.folders);
   await db.bulkPutNotes(state.notes);
 }
 
 /*
-   normalizeNote / normalizeFolder — defensive cleanup.
-   Guarantees every field exists and has the right type, filling
-   sensible defaults. This is what makes import robust against
-   partial or older files.
+   normalizeNote / normalizeFolder â€” defensive cleanup so old or
+   partial records always have every field with the right type.
+   â˜… deletedAt defaults to null (alive) â€” this is the whole reason
+   legacy notes and old backups keep working with no migration.
 */
 function normalizeNote(raw = {}) {
   const timestamp = now();
@@ -498,6 +474,8 @@ function normalizeNote(raw = {}) {
     pinned: Boolean(raw.pinned),
     createdAt: Number(raw.createdAt) || timestamp,
     updatedAt: Number(raw.updatedAt) || timestamp,
+    // Accept a real timestamp; anything else (undefined/null/0) = alive.
+    deletedAt: Number(raw.deletedAt) > 0 ? Number(raw.deletedAt) : null,
   };
 }
 
