@@ -343,7 +343,7 @@ function handleMove(id) {
 
 
 /* =============================================================
-   6b. EXPORT NOTE AS PDF   â˜… NEW (Phase 1 / Feature 1)
+   6b. EXPORT NOTE AS PDF   â˜… Phase 1 / Feature 1
    -------------------------------------------------------------
    Strategy: use the BROWSER'S NATIVE print-to-PDF instead of a
    third-party library. Why:
@@ -394,6 +394,14 @@ function escapeHtml(text = '') {
    It's intentionally standalone (its own <style>) so the PDF looks
    clean and consistent regardless of dark mode or the app's CSS.
    Title falls back to the first body line; tags/date shown as meta.
+
+   PAGE-BREAK / MARGIN handling (per requirements):
+     â€¢ @page margin: 18mm  â†’ even, printer-safe page margins.
+     â€¢ The header block (title + meta) is kept together and never
+       splits from the first lines of the body (break-inside/after).
+     â€¢ orphans/widows: 3  â†’ never leave 1â€“2 dangling lines alone at
+       the top/bottom of a page; text flows across pages cleanly.
+     â€¢ Long unbroken words wrap instead of overflowing the page.
 */
 function buildPrintDocument(note) {
   // Derive a sensible title even if the user never typed one.
@@ -404,54 +412,91 @@ function buildPrintDocument(note) {
 
   const title = escapeHtml(rawTitle);
   const body = escapeHtml(note.body || '');
-  const date = new Date(note.updatedAt || Date.now()).toLocaleString();
+
+  // Show BOTH created and updated dates when they differ, so the
+  // printed page carries full provenance (requirement: creation/updated).
+  const created = note.createdAt ? new Date(note.createdAt) : null;
+  const updated = note.updatedAt ? new Date(note.updatedAt) : null;
+  const fmt = (d) => d.toLocaleString(undefined, {
+    year: 'numeric', month: 'short', day: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+  let dateLine = '';
+  if (created && updated && Math.abs(updated - created) > 60000) {
+    dateLine = `Created ${fmt(created)} Â· Updated ${fmt(updated)}`;
+  } else if (updated) {
+    dateLine = fmt(updated);
+  } else if (created) {
+    dateLine = fmt(created);
+  }
+
   const tags = (note.tags || []).map((t) => '#' + escapeHtml(t)).join('  ');
 
-  // A4-friendly margins, readable measure, real print typography.
+  // A4/Letter-friendly margins, readable measure, real print typography.
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
 <title>${title}</title>
 <style>
-  @page { margin: 20mm; }
+  /* Even page margins on every printed sheet. */
+  @page { margin: 18mm; }
+
   * { box-sizing: border-box; }
+
+  html, body { margin: 0; padding: 0; }
+
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     color: #1c1a22;
     line-height: 1.6;
-    margin: 0;
+    /* Avoid single dangling lines at page tops/bottoms globally. */
+    orphans: 3;
+    widows: 3;
   }
+
   .doc { max-width: 72ch; margin: 0 auto; }
+
+  /* Keep the whole header together, and don't let a page break
+     fall between the header and the first lines of the note. */
+  .head {
+    break-inside: avoid;
+    break-after: avoid;
+    margin-bottom: 14pt;
+    padding-bottom: 10pt;
+    border-bottom: 1px solid #e2dfe8;
+  }
+
   h1 {
     font-size: 22pt;
     line-height: 1.2;
     margin: 0 0 6pt;
     letter-spacing: -0.01em;
+    break-after: avoid; /* title never sits alone at a page bottom */
   }
-  .meta {
-    font-size: 9pt;
-    color: #6b6676;
-    margin-bottom: 16pt;
-    padding-bottom: 10pt;
-    border-bottom: 1px solid #e2dfe8;
-  }
-  .meta .tags { color: #5b3fc4; }
-  /* Preserve the note's line breaks & spacing exactly as typed. */
+
+  .meta { font-size: 9pt; color: #6b6676; }
+  .meta .tags { color: #5b3fc4; margin-top: 2pt; }
+
+  /* Preserve the note's line breaks & spacing exactly as typed,
+     and let very long words/URLs wrap instead of overflowing. */
   .body {
     font-size: 11.5pt;
     white-space: pre-wrap;
-    word-wrap: break-word;
+    overflow-wrap: break-word;
+    word-break: break-word;
   }
 </style>
 </head>
 <body>
   <div class="doc">
-    <h1>${title}</h1>
-    <div class="meta">
-      <div>${date}</div>
-      ${tags ? `<div class="tags">${tags}</div>` : ''}
-    </div>
+    <header class="head">
+      <h1>${title}</h1>
+      <div class="meta">
+        ${dateLine ? `<div class="date">${escapeHtml(dateLine)}</div>` : ''}
+        ${tags ? `<div class="tags">${tags}</div>` : ''}
+      </div>
+    </header>
     <div class="body">${body}</div>
   </div>
 </body>
