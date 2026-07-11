@@ -290,12 +290,19 @@
               <i data-lucide="folder"></i>
             </button>
             <!--
-              NEW (Phase 1 / Feature 1): Export this note as PDF.
+              Phase 1 / Feature 1: Export this note as PDF.
               Uses the browser's native print-to-PDF via app.js.
-              Pure read action — carries data-action like every other button.
             -->
             <button class="icon-btn" type="button" data-action="export-pdf" aria-label="Export as PDF">
               <i data-lucide="file-down"></i>
+            </button>
+            <!--
+              NEW (Phase 1 / Feature 2): Export this note as an IMAGE (PNG/JPG).
+              Renders the note onto a <canvas> in app.js (no dependencies) and
+              downloads it. Pure read action, same data-action pattern.
+            -->
+            <button class="icon-btn" type="button" data-action="export-image" aria-label="Export as image">
+              <i data-lucide="image-down"></i>
             </button>
             <button class="icon-btn icon-btn--danger" type="button" data-action="delete-note" aria-label="Delete note">
               <i data-lucide="trash-2"></i>
