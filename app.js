@@ -168,9 +168,14 @@ function onClick(event) {
       handleMove(id || mount('editor').dataset.id);
       break;
 
-    /* --- NEW (Phase 1 / Feature 1): export the open note as PDF --- */
+    /* --- Phase 1 / Feature 1: export the open note as PDF --- */
     case 'export-pdf':
       handleExportPdf(id || mount('editor').dataset.id);
+      break;
+
+    /* --- NEW (Phase 1 / Feature 2): export the open note as an image --- */
+    case 'export-image':
+      handleExportImage(id || mount('editor').dataset.id);
       break;
 
     case 'close-editor':
@@ -346,39 +351,25 @@ function handleMove(id) {
    6b. EXPORT NOTE AS PDF   â˜… Phase 1 / Feature 1
    -------------------------------------------------------------
    Strategy: use the BROWSER'S NATIVE print-to-PDF instead of a
-   third-party library. Why:
-     â€¢ zero dependencies â†’ stays fully offline (no CDN to cache)
-     â€¢ real, selectable, searchable text with proper pagination
-     â€¢ works on Android Chrome (Print â†’ "Save as PDF")
-
-   How it works:
-     1. Build a clean, self-contained print document (its own
-        light styles, independent of the app's theme).
-     2. Load it into a HIDDEN <iframe> (popups are unreliable
-        inside an installed/standalone PWA; an iframe is not).
-     3. Call print() on the iframe, then remove it afterward.
-
-   This is a pure READ action: it reads the open note from the
-   store and writes nothing. No store/db/schema involvement.
+   third-party library. Zero dependencies, real selectable text,
+   proper pagination, works on Android (Print â†’ "Save as PDF").
+   Renders into a hidden iframe (popups are unreliable in a PWA).
+   Pure READ action â€” no store/db/schema involvement.
    ============================================================= */
 function handleExportPdf(id) {
-  // The button lives in the editor, so the target is the open note.
   const note = store.getSelectedNote();
   if (!note || (id && note.id !== id)) {
     ui.toast('Open a note first to export it.');
     return;
   }
-
   const html = buildPrintDocument(note);
   printViaIframe(html, () => ui.toast('Opening printâ€¦ choose â€œSave as PDFâ€.'));
 }
 
 /*
    escapeHtml â€” turn user text into safe HTML for the print doc.
-   The note body/title can contain characters like < > & that
-   would otherwise be interpreted as markup. We convert them so
-   they render literally (this is the same XSS-safety principle
-   ui.js uses with textContent).
+   Converts < > & " ' so note content renders literally (XSS-safe,
+   same principle ui.js uses with textContent).
 */
 function escapeHtml(text = '') {
   return text
@@ -390,102 +381,84 @@ function escapeHtml(text = '') {
 }
 
 /*
-   buildPrintDocument(note) â€” return a full HTML string for print.
-   It's intentionally standalone (its own <style>) so the PDF looks
-   clean and consistent regardless of dark mode or the app's CSS.
-   Title falls back to the first body line; tags/date shown as meta.
-
-   PAGE-BREAK / MARGIN handling (per requirements):
-     â€¢ @page margin: 18mm  â†’ even, printer-safe page margins.
-     â€¢ The header block (title + meta) is kept together and never
-       splits from the first lines of the body (break-inside/after).
-     â€¢ orphans/widows: 3  â†’ never leave 1â€“2 dangling lines alone at
-       the top/bottom of a page; text flows across pages cleanly.
-     â€¢ Long unbroken words wrap instead of overflowing the page.
+   humanDateLine(note) â€” a friendly date string used by both PDF
+   and image export. Shows created + updated when they differ.
 */
-function buildPrintDocument(note) {
-  // Derive a sensible title even if the user never typed one.
-  const rawTitle =
-    (note.title && note.title.trim()) ||
-    (note.body || '').split('\n')[0].trim() ||
-    'Untitled note';
-
-  const title = escapeHtml(rawTitle);
-  const body = escapeHtml(note.body || '');
-
-  // Show BOTH created and updated dates when they differ, so the
-  // printed page carries full provenance (requirement: creation/updated).
+function humanDateLine(note) {
   const created = note.createdAt ? new Date(note.createdAt) : null;
   const updated = note.updatedAt ? new Date(note.updatedAt) : null;
   const fmt = (d) => d.toLocaleString(undefined, {
     year: 'numeric', month: 'short', day: 'numeric',
     hour: '2-digit', minute: '2-digit',
   });
-  let dateLine = '';
   if (created && updated && Math.abs(updated - created) > 60000) {
-    dateLine = `Created ${fmt(created)} Â· Updated ${fmt(updated)}`;
-  } else if (updated) {
-    dateLine = fmt(updated);
-  } else if (created) {
-    dateLine = fmt(created);
+    return `Created ${fmt(created)} Â· Updated ${fmt(updated)}`;
   }
+  if (updated) return fmt(updated);
+  if (created) return fmt(created);
+  return '';
+}
 
+/*
+   noteDisplayTitle(note) â€” the title, falling back to the first
+   body line, then "Untitled note". Shared by both exporters.
+*/
+function noteDisplayTitle(note) {
+  return (
+    (note.title && note.title.trim()) ||
+    (note.body || '').split('\n')[0].trim() ||
+    'Untitled note'
+  );
+}
+
+/*
+   safeFilename(text) â€” turn a title into a filesystem-friendly
+   name for downloads (letters/numbers/dashes only).
+*/
+function safeFilename(text = 'note') {
+  return (
+    text.trim().toLowerCase()
+      .replace(/[^\w\s-]/g, '')  // drop punctuation
+      .replace(/\s+/g, '-')       // spaces â†’ dashes
+      .replace(/-+/g, '-')        // collapse repeats
+      .slice(0, 48) || 'note'
+  );
+}
+
+/*
+   buildPrintDocument(note) â€” full standalone HTML for print.
+   Own light styling so the PDF is consistent regardless of theme.
+   Page-break rules: even @page margins, header kept together,
+   orphans/widows control, long words wrap.
+*/
+function buildPrintDocument(note) {
+  const title = escapeHtml(noteDisplayTitle(note));
+  const body = escapeHtml(note.body || '');
+  const dateLine = humanDateLine(note);
   const tags = (note.tags || []).map((t) => '#' + escapeHtml(t)).join('  ');
 
-  // A4/Letter-friendly margins, readable measure, real print typography.
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
 <title>${title}</title>
 <style>
-  /* Even page margins on every printed sheet. */
   @page { margin: 18mm; }
-
   * { box-sizing: border-box; }
-
   html, body { margin: 0; padding: 0; }
-
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-    color: #1c1a22;
-    line-height: 1.6;
-    /* Avoid single dangling lines at page tops/bottoms globally. */
-    orphans: 3;
-    widows: 3;
+    color: #1c1a22; line-height: 1.6; orphans: 3; widows: 3;
   }
-
   .doc { max-width: 72ch; margin: 0 auto; }
-
-  /* Keep the whole header together, and don't let a page break
-     fall between the header and the first lines of the note. */
   .head {
-    break-inside: avoid;
-    break-after: avoid;
-    margin-bottom: 14pt;
-    padding-bottom: 10pt;
-    border-bottom: 1px solid #e2dfe8;
+    break-inside: avoid; break-after: avoid;
+    margin-bottom: 14pt; padding-bottom: 10pt; border-bottom: 1px solid #e2dfe8;
   }
-
-  h1 {
-    font-size: 22pt;
-    line-height: 1.2;
-    margin: 0 0 6pt;
-    letter-spacing: -0.01em;
-    break-after: avoid; /* title never sits alone at a page bottom */
-  }
-
+  h1 { font-size: 22pt; line-height: 1.2; margin: 0 0 6pt; letter-spacing: -0.01em; break-after: avoid; }
   .meta { font-size: 9pt; color: #6b6676; }
   .meta .tags { color: #5b3fc4; margin-top: 2pt; }
-
-  /* Preserve the note's line breaks & spacing exactly as typed,
-     and let very long words/URLs wrap instead of overflowing. */
-  .body {
-    font-size: 11.5pt;
-    white-space: pre-wrap;
-    overflow-wrap: break-word;
-    word-break: break-word;
-  }
+  .body { font-size: 11.5pt; white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word; }
 </style>
 </head>
 <body>
@@ -505,14 +478,11 @@ function buildPrintDocument(note) {
 
 /*
    printViaIframe(html, onReady) â€” render HTML in a hidden iframe
-   and trigger the print dialog. Using an iframe (not window.open)
-   keeps this working inside an installed PWA and avoids popup
-   blockers. We clean the iframe up after printing.
+   and trigger print. Iframe (not window.open) keeps this working
+   inside an installed PWA and avoids popup blockers.
 */
 function printViaIframe(html, onReady) {
   const iframe = document.createElement('iframe');
-  // Keep it out of sight but still renderable (display:none can
-  // suppress printing in some engines, so we hide it off-screen).
   iframe.style.position = 'fixed';
   iframe.style.right = '0';
   iframe.style.bottom = '0';
@@ -520,7 +490,6 @@ function printViaIframe(html, onReady) {
   iframe.style.height = '0';
   iframe.style.border = '0';
   iframe.setAttribute('aria-hidden', 'true');
-
   document.body.appendChild(iframe);
 
   const doc = iframe.contentWindow.document;
@@ -528,7 +497,6 @@ function printViaIframe(html, onReady) {
   doc.write(html);
   doc.close();
 
-  // Wait for the iframe document to finish laying out before printing.
   const triggerPrint = () => {
     try {
       iframe.contentWindow.focus();
@@ -538,17 +506,213 @@ function printViaIframe(html, onReady) {
       console.error('Print failed:', err);
       ui.toast('Could not open the print dialog.');
     }
-    // Remove the iframe a moment after the print dialog is handled.
     setTimeout(() => iframe.remove(), 1000);
   };
 
-  // 'load' is the reliable signal; fall back to a short timeout.
   if (iframe.contentWindow.document.readyState === 'complete') {
     setTimeout(triggerPrint, 50);
   } else {
     iframe.addEventListener('load', triggerPrint, { once: true });
-    setTimeout(triggerPrint, 500); // safety net if 'load' never fires
+    setTimeout(triggerPrint, 500);
   }
+}
+
+
+/* =============================================================
+   6c. EXPORT NOTE AS IMAGE (PNG/JPG)   â˜… NEW Phase 1 / Feature 2
+   -------------------------------------------------------------
+   Strategy: draw the note onto an HTML <canvas> ourselves, then
+   save the canvas as an image. No libraries â†’ stays offline.
+
+   Why canvas (not html2canvas): zero dependencies, pixel-perfect,
+   and we scale the canvas by devicePixelRatio so text is CRISP on
+   phones/retina screens.
+
+   Flow:
+     1. Measure how tall the note will be (wrap the body text to a
+        fixed content width and count the resulting lines).
+     2. Size the canvas (scaled for retina), paint background,
+        title, meta/tags, then each wrapped line.
+     3. Convert to a Blob and download as .png or .jpg.
+
+   Pure READ action â€” no store/db/schema involvement.
+   ============================================================= */
+async function handleExportImage(id) {
+  const note = store.getSelectedNote();
+  if (!note || (id && note.id !== id)) {
+    ui.toast('Open a note first to export it.');
+    return;
+  }
+
+  // Ask which format. OK = PNG (crisp, larger), Cancel = JPG (smaller).
+  const wantPng = confirm(
+    'Export as image:\n\nOK = PNG (sharp text, larger file)\nCancel = JPG (smaller file)'
+  );
+  const format = wantPng ? 'png' : 'jpg';
+
+  try {
+    const blob = await renderNoteToImageBlob(note, format);
+    const name = `${safeFilename(noteDisplayTitle(note))}.${format}`;
+    downloadBlob(blob, name);
+    ui.toast(`Saved ${format.toUpperCase()} image`);
+  } catch (err) {
+    console.error('Image export failed:', err);
+    ui.toast('Could not create the image.');
+  }
+}
+
+/*
+   downloadBlob(blob, filename) â€” trigger a download for a binary
+   Blob (the image). Mirrors utils.download, which is text-only.
+   We create a temporary object URL, click a link, then revoke it.
+*/
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/*
+   wrapText(ctx, text, maxWidth) â€” split text into lines that fit
+   within maxWidth, respecting existing newlines. Returns an array
+   of line strings. This is the core of laying text on a canvas
+   (canvas has no automatic word-wrap; we do it by measuring).
+*/
+function wrapText(ctx, text, maxWidth) {
+  const lines = [];
+  // Preserve the user's own line breaks firstâ€¦
+  for (const rawLine of String(text).split('\n')) {
+    if (rawLine === '') { lines.push(''); continue; } // keep blank lines
+    // â€¦then wrap each paragraph by words.
+    let current = '';
+    for (const word of rawLine.split(/(\s+)/)) { // keep spaces as tokens
+      const trial = current + word;
+      if (ctx.measureText(trial).width > maxWidth && current) {
+        lines.push(current.trimEnd());
+        current = word.trimStart();
+      } else {
+        current = trial;
+      }
+    }
+    if (current.trim() !== '' || current === '') lines.push(current.trimEnd());
+  }
+  return lines;
+}
+
+/*
+   renderNoteToImageBlob(note, format) â€” the actual drawing.
+   Returns a Promise<Blob>. All sizes are in CSS pixels; we multiply
+   by `scale` for the physical canvas so it's sharp on retina.
+*/
+function renderNoteToImageBlob(note, format) {
+  return new Promise((resolve, reject) => {
+    // --- Layout constants (CSS px) ---
+    const scale = Math.min(window.devicePixelRatio || 1, 3); // cap at 3x
+    const width = 800;          // fixed card width
+    const padding = 56;
+    const contentW = width - padding * 2;
+
+    const titleFont = '700 34px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
+    const metaFont = '400 15px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
+    const bodyFont = '400 19px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
+    const titleLH = 42, metaLH = 22, bodyLH = 30;
+
+    // A temporary context just for measuring/wrapping.
+    const measureCanvas = document.createElement('canvas');
+    const mctx = measureCanvas.getContext('2d');
+
+    // --- Wrap each text block to know the total height ---
+    mctx.font = titleFont;
+    const titleLines = wrapText(mctx, noteDisplayTitle(note), contentW);
+
+    const dateLine = humanDateLine(note);
+    const tagsLine = (note.tags || []).map((t) => '#' + t).join('  ');
+
+    mctx.font = bodyFont;
+    const bodyLines = wrapText(mctx, note.body || '', contentW);
+
+    // --- Compute total canvas height from the pieces ---
+    let y = padding;
+    y += titleLines.length * titleLH;
+    y += 10; // gap after title
+    if (dateLine) y += metaLH;
+    if (tagsLine) y += metaLH;
+    y += 18; // gap before divider
+    y += 1 + 22; // divider + gap
+    const bodyStart = y;
+    y += bodyLines.length * bodyLH;
+    y += padding; // bottom padding
+    const height = Math.max(y, 240);
+
+    // --- Create the real, retina-scaled canvas ---
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(width * scale);
+    canvas.height = Math.round(height * scale);
+    const ctx = canvas.getContext('2d');
+    ctx.scale(scale, scale); // now we can draw in CSS px
+
+    // Background. JPG has no transparency, so always paint white;
+    // PNG gets white too for a clean "card" look (change to leave
+    // transparent if you prefer).
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+
+    // --- Draw title ---
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = '#1c1a22';
+    ctx.font = titleFont;
+    let cursorY = padding;
+    for (const line of titleLines) {
+      ctx.fillText(line, padding, cursorY);
+      cursorY += titleLH;
+    }
+    cursorY += 10;
+
+    // --- Draw meta (date + tags) ---
+    ctx.font = metaFont;
+    if (dateLine) {
+      ctx.fillStyle = '#6b6676';
+      ctx.fillText(dateLine, padding, cursorY);
+      cursorY += metaLH;
+    }
+    if (tagsLine) {
+      ctx.fillStyle = '#5b3fc4';
+      ctx.fillText(tagsLine, padding, cursorY);
+      cursorY += metaLH;
+    }
+    cursorY += 18;
+
+    // --- Divider line ---
+    ctx.strokeStyle = '#e2dfe8';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(padding, cursorY + 0.5);
+    ctx.lineTo(width - padding, cursorY + 0.5);
+    ctx.stroke();
+    cursorY += 22;
+
+    // --- Draw body ---
+    ctx.font = bodyFont;
+    ctx.fillStyle = '#2c2933';
+    for (const line of bodyLines) {
+      ctx.fillText(line, padding, cursorY);
+      cursorY += bodyLH;
+    }
+
+    // --- Export to a Blob ---
+    const mime = format === 'png' ? 'image/png' : 'image/jpeg';
+    const quality = format === 'png' ? undefined : 0.92;
+    canvas.toBlob(
+      (blob) => (blob ? resolve(blob) : reject(new Error('toBlob returned null'))),
+      mime,
+      quality
+    );
+  });
 }
 
 
