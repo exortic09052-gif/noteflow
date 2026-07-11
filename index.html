@@ -93,9 +93,9 @@
   <meta name="theme-color" content="#f7f6f9" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#17151c" media="(prefers-color-scheme: dark)" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
 
-  <title>Slate — Notes</title>
+  <title>NoteFlow — Notes</title>
 
   <!--
     We set the theme BEFORE CSS/paint to avoid a "flash of wrong theme".
@@ -152,7 +152,7 @@
       <span class="brand__mark" aria-hidden="true">
         <i data-lucide="notebook-pen"></i>
       </span>
-      <span class="brand__name">Slate</span>
+      <span class="brand__name">NoteFlow</span>
     </a>
 
     <!-- Search is a real form so Enter behaves and screen readers announce it -->
@@ -288,6 +288,14 @@
             </button>
             <button class="icon-btn" type="button" data-action="move-note" aria-label="Move to folder">
               <i data-lucide="folder"></i>
+            </button>
+            <!--
+              NEW (Phase 1 / Feature 1): Export this note as PDF.
+              Uses the browser's native print-to-PDF via app.js.
+              Pure read action — carries data-action like every other button.
+            -->
+            <button class="icon-btn" type="button" data-action="export-pdf" aria-label="Export as PDF">
+              <i data-lucide="file-down"></i>
             </button>
             <button class="icon-btn icon-btn--danger" type="button" data-action="delete-note" aria-label="Delete note">
               <i data-lucide="trash-2"></i>
